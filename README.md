@@ -23,7 +23,7 @@ git submodule update --init --recursive
 | postgres-pbm | `buffer_cache/postgres-pbm` | [TheoVanderkooy/postgres-pbm](https://github.com/TheoVanderkooy/postgres-pbm) |
 | Index Selection Evaluation | `index_selection/deps/Index_EAB` | [hyrise/index_selection_evaluation](https://github.com/hyrise/index_selection_evaluation) |
 | OpenEvolve | `index_selection/deps/openevolve` | [algorithmicsuperintelligence/openevolve](https://github.com/algorithmicsuperintelligence/openevolve) |
-| LearnedRewrite (R-Bot) | `query_rewrite/rbot` | [XuanheZhou/LearnedRewrite](https://github.com/XuanheZhou/LearnedRewrite) |
+| R-Bot | `query_rewrite/rbot` | [XuanheZhou/LearnedRewrite](https://github.com/XuanheZhou/LearnedRewrite) |
 
 ## Setup
 
