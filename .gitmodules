@@ -1,0 +1,12 @@
+[submodule "buffer_cache/postgres-pbm"]
+	path = buffer_cache/postgres-pbm
+	url = https://github.com/TheoVanderkooy/postgres-pbm.git
+[submodule "index_selection/deps/Index_EAB"]
+	path = index_selection/deps/Index_EAB
+	url = https://github.com/hyrise/index_selection_evaluation.git
+[submodule "index_selection/deps/openevolve"]
+	path = index_selection/deps/openevolve
+	url = https://github.com/algorithmicsuperintelligence/openevolve.git
+[submodule "query_rewrite/rbot"]
+	path = query_rewrite/rbot
+	url = https://github.com/XuanheZhou/LearnedRewrite.git

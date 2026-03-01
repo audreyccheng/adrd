@@ -1,0 +1,183 @@
+# OpenEvolve Configuration - Multi-Workload Generalization
+# =========================================================
+# KEY INSIGHT: Train on ALL benchmarks to prevent overfitting.
+# Focus on universal techniques that work across workloads.
+
+output_dir: "outputs/multi_workload"
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 100
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 40
+convergence_threshold: 0.002
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.85
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## PROBLEM: SELECT INDEXES TO MINIMIZE QUERY COST
+    
+    Given a workload (SQL queries) and candidate indexes, select indexes that minimize
+    total query execution cost while respecting storage budget and count limits.
+    
+    **You will be evaluated on MULTIPLE different workloads (TPC-H, TPC-DS, JOB).**
+    Your algorithm must generalize - don't overfit to any single workload!
+    
+    ## TECHNIQUES THAT WORK ACROSS ALL WORKLOADS
+    
+    These are **universal principles** - they work regardless of workload:
+    
+    ### 1. BENEFIT-PER-BYTE RANKING (Most Important!)
+    ```python
+    score = (baseline_cost - cost_with_index) / index_size
+    ```
+    Prioritize indexes that give the most cost reduction per storage byte.
+    This works universally because it's a fundamental efficiency metric.
+    
+    ### 2. COST CACHING
+    ```python
+    cost_cache = {}
+    def eval_cost(index_set):
+        key = frozenset(index_set)
+        if key in cost_cache:
+            return cost_cache[key]
+        cost = cost_evaluation.calculate_cost(...)
+        cost_cache[key] = cost
+        return cost
+    ```
+    Avoid redundant expensive evaluations. Works on any workload.
+    
+    ### 3. REDUNDANCY DETECTION
+    ```python
+    # Index(a,b) makes Index(a) redundant on same table
+    def is_redundant(idx, selected):
+        for s in selected:
+            if s.table() == idx.table():
+                if idx.columns is prefix of s.columns:
+                    return True
+        return False
+    ```
+    Don't waste storage on subsumed indexes. Universal principle.
+    
+    ### 4. RANDOM RESTARTS
+    ```python
+    best_solution = None
+    for seed in [None] + top_candidates[:5]:
+        solution = greedy_build(starting_from=seed)
+        if solution better than best_solution:
+            best_solution = solution
+    ```
+    Escape local optima by trying multiple starting points.
+    
+    ### 5. LOCAL SWAP REFINEMENT
+    ```python
+    # After greedy, try improving by swapping indexes
+    for idx_in_solution in current_solution:
+        for candidate in remaining_candidates:
+            if swap improves cost:
+                do the swap
+    ```
+    Simple hill-climbing that works on any workload.
+    
+    ## AVOID THESE (CAUSES OVERFITTING OR TIMEOUTS!)
+    
+    ❌ **Too many restarts** - more than 2-3 random restarts is too slow
+    ❌ **Unbounded iteration loops** - always use max iteration limits
+    ❌ **Hardcoded parameters** tuned to specific workload sizes
+    ❌ **Complex column frequency weighting** - learns wrong patterns
+    ❌ **Workload-specific heuristics** - won't transfer
+    
+    ## TIME CONSTRAINT
+    
+    Keep your algorithm fast to avoid timeouts on larger benchmarks:
+    - Limit restarts/seeds to 2-3
+    - Bound iteration loops (e.g., max 10 swap iterations)
+    - Cache cost evaluations when possible
+    
+    ## CONSTRAINTS (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    **Hard constraints (violation = score 0.0):**
+    - Storage: sum(idx.estimated_size) <= budget_MB * 1024 * 1024
+    - Count: len(selected) <= max_indexes
+    
+    **Soft goals:**
+    - Maximize cost reduction (80% weight)
+    - Never return empty set when candidates exist
+    
+    ## AVAILABLE APIs
+    
+    ```python
+    workload.queries           # List of Query objects
+    query.columns              # Columns in query
+    query.frequency            # Execution frequency (default 1)
+    
+    idx.columns                # Tuple of columns
+    idx.table()                # Table object  
+    idx.estimated_size         # Bytes (may be None - handle gracefully!)
+    
+    cost_evaluation.calculate_cost(workload, index_set, store_size=True)
+    ```
+    
+    Return ONLY the evolved function code. Keep it simple and general!
+
+  num_top_programs: 3
+  num_diverse_programs: 2
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 100
+  num_islands: 3
+  migration_interval: 10
+  migration_rate: 0.1
+  elite_selection_ratio: 0.15
+  exploration_ratio: 0.30
+  exploitation_ratio: 0.60
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 10
+
+evaluator:
+  timeout: 900              # 15 min for multi-benchmark eval
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 3   # One per benchmark
+  use_llm_feedback: false
+
+# Custom setting (passed via environment variable EVAL_BENCHMARK)
+eval_benchmark: "all"       # tpch + tpcds + job
+

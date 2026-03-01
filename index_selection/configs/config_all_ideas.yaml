@@ -1,0 +1,198 @@
+# OpenEvolve Configuration - All Ideas Combined (For Later)
+# ==========================================================
+# This config contains detailed prompts for all optimization ideas.
+# Use this for focused experimentation after trying the simpler configs.
+
+output_dir: "outputs/all_ideas"  # Overridden by run_openevolve.py
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 50
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 50
+convergence_threshold: 0.002
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.85
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection and combinatorial optimization.
+    
+    ## PROBLEM: SELECT INDEXES TO MINIMIZE QUERY COST
+    
+    Given a workload (SQL queries) and candidates, select indexes that minimize
+    total query execution cost while respecting storage budget and max count.
+    
+    ## CURRENT BASELINE: GREEDY IS LIMITED
+    
+    The baseline uses greedy expansion (AutoAdmin algorithm):
+    1. Exhaustively search small seeds (1-2 indexes)
+    2. Greedily add the best next index until done
+    
+    **Limitations:**
+    - Gets stuck in local optima (no backtracking)
+    - Treats indexes independently (misses interactions)
+    - Ignores workload statistics (treats all queries equally)
+    
+    ---
+    
+    ## ADVANCED TECHNIQUES TO TRY
+    
+    ### A. ESCAPE LOCAL OPTIMA
+    
+    **Simulated Annealing:**
+    - Accept worse solutions with probability exp(-delta/temperature)
+    - Temperature decreases over time (cooling schedule)
+    - Neighborhood: add/remove/swap indexes
+    
+    **Random Restarts:**
+    - Run greedy multiple times from different starting points
+    - Keep the best result across all runs
+    
+    **Genetic Algorithms:**
+    - Population of solutions, crossover, mutation
+    - Selection pressure keeps good solutions
+    - Crossover combines partial solutions
+    
+    ### B. MODEL INDEX INTERACTIONS
+    
+    **Submodularity:**
+    - Benefit of adding index X depends on what's already selected
+    - Re-evaluate marginal benefit at each step
+    - benefit(A+B) often < benefit(A) + benefit(B)
+    
+    **Redundancy Detection:**
+    - Index(a,b) subsumes Index(a)
+    - Don't select both - waste of storage
+    
+    **Synergy Detection:**
+    - Some indexes work better together
+    - Joint benefit > sum of individual benefits
+    - Look for complementary coverage
+    
+    ### C. USE WORKLOAD STATISTICS
+    
+    **Column Frequency:**
+    - Count how often each column appears in queries
+    - Prioritize indexes on high-frequency columns
+    
+    **Query Weighting:**
+    - Some queries run more often (query.frequency)
+    - Weight cost reduction by execution frequency
+    
+    **Benefit-per-MB:**
+    - Prefer indexes with high benefit relative to size
+    - benefit / estimated_size as ranking metric
+    
+    ### D. MATHEMATICAL OPTIMIZATION
+    
+    **Knapsack Formulation:**
+    - This is essentially 0/1 knapsack with cardinality constraint
+    - Dynamic programming for small instances
+    - Greedy approximation for larger ones
+    
+    **LP Relaxation:**
+    - Relax binary constraint to continuous [0,1]
+    - Solve greedily (benefit/size ratio ordering)
+    - Round to integer solution
+    
+    ### E. EFFICIENT EVALUATION
+    
+    **Cost Caching:**
+    - Cache cost evaluations by configuration
+    - Avoid redundant expensive calls
+    
+    **Proxy Scoring:**
+    - Use cheap heuristics to filter candidates
+    - Only evaluate top candidates with expensive cost function
+    
+    **Early Stopping:**
+    - Stop if marginal benefit < threshold
+    - Time-box expensive operations
+    
+    ---
+    
+    ## CONSTRAINTS (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    **Hard constraints (violation = score 0.0):**
+    - Storage: sum(idx.estimated_size) <= budget_MB * 1024 * 1024
+    - Count: len(selected) <= max_indexes
+    
+    **Soft goals:**
+    - Maximize cost reduction (primary, 80% weight)
+    - Never return empty set when candidates exist
+    
+    ## AVAILABLE APIs
+    
+    ```python
+    # Workload
+    workload.queries           # List of Query objects
+    query.columns              # Columns in query
+    query.frequency            # Execution frequency (default 1)
+    
+    # Index
+    idx.columns                # Tuple of columns
+    idx.table()                # Table object
+    idx.estimated_size         # Bytes (may be None)
+    
+    # Cost evaluation
+    cost_evaluation.calculate_cost(workload, index_set, store_size=True)
+    ```
+    
+    Return ONLY the evolved function code.
+
+  num_top_programs: 3
+  num_diverse_programs: 2
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 100
+  num_islands: 3
+  migration_interval: 10
+  migration_rate: 0.1
+  elite_selection_ratio: 0.15
+  exploration_ratio: 0.30
+  exploitation_ratio: 0.60
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 10
+
+evaluator:
+  timeout: 600
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 4
+  use_llm_feedback: false
+

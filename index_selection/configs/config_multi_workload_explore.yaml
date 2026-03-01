@@ -1,0 +1,188 @@
+# OpenEvolve Configuration - Multi-Workload with Exploration Focus
+# ================================================================
+# KEY INSIGHT: Simulated annealing showed BEST generalization (escape_local_optima_extend).
+# This config emphasizes exploration techniques to escape local optima.
+
+output_dir: "outputs/multi_workload_explore"
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 101
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 40
+convergence_threshold: 0.002
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.90          # Higher for more diverse exploration
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## PROBLEM: SELECT INDEXES TO MINIMIZE QUERY COST
+    
+    Select indexes to minimize query cost while respecting storage and count constraints.
+    
+    **CRITICAL: You will be evaluated on MULTIPLE workloads (TPC-H, TPC-DS, JOB).**
+    Your algorithm must generalize across all of them!
+    
+    ## KEY INSIGHT: GREEDY GETS STUCK - YOU MUST EXPLORE
+    
+    Greedy algorithms find decent solutions but get **trapped in local optima**.
+    The best generalizing algorithms use **exploration** to escape these traps.
+    
+    ### EXPLORATION TECHNIQUES (Use These!)
+    
+    **1. Simulated Annealing (Best for Generalization!)**
+    ```python
+    import random, math
+    
+    def anneal(current_solution, current_cost, steps=30):
+        best = current_solution
+        best_cost = current_cost
+        T = 0.05  # Starting temperature
+        
+        for step in range(steps):
+            # Random move: add, remove, or swap
+            new_solution = random_neighbor(current_solution)
+            new_cost = eval_cost(new_solution)
+            
+            delta = new_cost - current_cost
+            # Accept if better, or with probability exp(-delta/T)
+            if delta < 0 or random.random() < math.exp(-delta / (current_cost * T)):
+                current_solution = new_solution
+                current_cost = new_cost
+                if new_cost < best_cost:
+                    best = new_solution
+                    best_cost = new_cost
+            
+            T *= 0.95  # Cool down
+        return best, best_cost
+    ```
+    
+    **2. Multiple Random Restarts**
+    ```python
+    best_overall = None
+    for restart in range(5):
+        # Start from different seeds
+        seed = random.choice(top_candidates) if restart > 0 else None
+        solution = greedy_build(seed)
+        solution = local_improve(solution)
+        if better than best_overall:
+            best_overall = solution
+    ```
+    
+    **3. Kick-and-Refill**
+    ```python
+    # If stuck, remove worst contributor and rebuild
+    def kick(solution):
+        # Find index with lowest marginal contribution
+        worst = min(solution, key=lambda x: marginal_benefit(x, solution))
+        reduced = solution - {worst}
+        # Rebuild greedily from reduced set
+        return greedy_refill(reduced)
+    ```
+    
+    **4. Swap-Based Local Search**
+    ```python
+    improved = True
+    while improved:
+        improved = False
+        for idx_out in solution:
+            for idx_in in candidates - solution:
+                if swap improves cost:
+                    solution = (solution - {idx_out}) | {idx_in}
+                    improved = True
+                    break
+    ```
+    
+    ## AVOID THESE (CAUSES OVERFITTING OR TIMEOUTS!)
+    
+    ❌ **Too many restarts** - more than 3 random restarts is too slow
+    ❌ **Unbounded iteration loops** - always use max iteration limits  
+    ❌ Complex workload-specific tuning
+    ❌ Hardcoded parameters for specific benchmarks
+    ❌ Column frequency weights (learns wrong patterns)
+    
+    ## TIME CONSTRAINT (IMPORTANT!)
+    
+    Your algorithm will be penalized for slow execution:
+    - Under 60s: no penalty
+    - 60s-300s: linear penalty up to 10%
+    - Over 300s: may timeout on larger benchmarks
+    
+    **Keep algorithms fast!** Limit restarts to 2-3, limit swap/SA iterations to 10-20.
+    
+    ## KEEP IT SIMPLE
+    
+    The best generalizing solution uses:
+    1. **Benefit-per-byte** for candidate ranking
+    2. **Random restarts** for exploration
+    3. **Simulated annealing** to escape local optima
+    4. **Local swaps** for refinement
+    5. **Cost caching** for efficiency
+    
+    ## CONSTRAINTS (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    **Hard constraints:** Storage <= budget, Count <= max_indexes
+    **Violation = score 0.0**
+    
+    Return ONLY the evolved function code.
+
+  num_top_programs: 3
+  num_diverse_programs: 2
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 100
+  num_islands: 3
+  migration_interval: 10
+  migration_rate: 0.1
+  elite_selection_ratio: 0.15
+  exploration_ratio: 0.40     # Higher exploration
+  exploitation_ratio: 0.50    # Balance with exploitation
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 10
+
+evaluator:
+  timeout: 900              # 15 min for multi-benchmark eval
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 3
+  use_llm_feedback: false
+
+# Custom setting (passed via environment variable EVAL_BENCHMARK)
+eval_benchmark: "all"       # Evaluate on ALL benchmarks
+

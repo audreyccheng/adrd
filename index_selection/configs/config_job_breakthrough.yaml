@@ -1,0 +1,167 @@
+# OpenEvolve Configuration - JOB Breakthrough Extension
+# =====================================================
+# GOAL: Extend the 52.1% breakthrough even further
+#
+# Current state:
+# - Previous ceiling: 43.9% (3-way tie: extend, autoadmin, initial_program)
+# - BREAKTHROUGH: 52.1% by job_only_explore_extend (+8.2%!)
+# - Key techniques: table weights, kick-and-refill, join key detection
+#
+# Strategy: Build on breakthrough, try to push past 52.1%
+
+output_dir: "outputs/job_breakthrough"
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 302
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 50
+convergence_threshold: 0.003
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.90
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## CHALLENGE: EXTEND THE 52.1% BREAKTHROUGH ON JOB
+    
+    **Current best: 52.1% cost reduction** - a breakthrough from the 43.9% ceiling!
+    Your goal: Push even further. Can we reach 55%? 60%?
+    
+    ## JOB/IMDB SCHEMA INSIGHTS (21 tables, 2000MB budget)
+    
+    | Table | Query Coverage | Rows | Notes |
+    |-------|----------------|------|-------|
+    | **title** | 100% | 2.5M | 🔥 MANDATORY - every single query |
+    | **name** | 80% | 4.2M | 🔥 High-value joins |
+    | **movie_keyword** | 80% | 4.5M | 🔥 High-value joins |
+    | **cast_info** | 51% | 36M | ⚠️ HUGE table - careful! |
+    | movie_info | 40% | 15M | Medium priority |
+    | aka_name | 20% | 900K | Lower priority |
+    
+    ## WHAT WORKED IN THE 52.1% BREAKTHROUGH
+    
+    These techniques broke the 43.9% ceiling - they're proven:
+    
+    1. **Table prioritization**: Boosted title/name/movie_keyword, penalized cast_info
+    2. **Join key awareness**: Prioritized `*_id` columns
+    3. **Local optima escape**: Removed worst indexes and refilled
+    4. **Cost caching**: Enabled more exploration within time limit
+    5. **Full budget usage**: Used 1990/2000 MB (99.5%)
+    
+    ## TOP 3 TECHNIQUES TO PUSH FURTHER
+    
+    ### 1. DEEPER INDEX INTERACTION ANALYSIS 🔬 (MOST PROMISING)
+    
+    **Goal**: Find index combinations with super-additive benefits.
+    
+    **Insight**: The breakthrough used simple pairwise synergy. But 3-way 
+    or 4-way interactions might reveal even better combinations. Some 
+    indexes may only become valuable when specific OTHER indexes are present.
+    
+    **Key consideration**: This is expensive to compute. Focus on top 
+    candidates only. Look for patterns like: "index A on title + index B 
+    on cast_info together reduce cost more than sum of individuals."
+    
+    **Avoid**: Exhaustive search (too slow); ignoring interactions entirely.
+    
+    ### 2. QUERY-AWARE BUDGET ALLOCATION 📊 (WORKLOAD STRUCTURE)
+    
+    **Goal**: Allocate index budget proportionally to query importance.
+    
+    **Insight**: Not all queries contribute equally to workload cost. 
+    The most expensive queries (before indexing) have the most room for 
+    improvement. Indexes that help the top-5 costliest queries may have 
+    outsized impact.
+    
+    **Key consideration**: Identify which queries dominate baseline cost. 
+    Prioritize indexes whose columns appear in those expensive queries.
+    
+    **Avoid**: Equal treatment of all queries; ignoring query frequency weights.
+    
+    ### 3. ADAPTIVE INDEX WIDTH 📏 (SIZE-AWARE DESIGN)
+    
+    **Goal**: Optimize index column count based on table characteristics.
+    
+    **Insight**: The breakthrough used width=2 for cast_info (36M rows) 
+    and width=3 for others. But this could be refined further. Tiny 
+    tables might benefit from width=4. The optimal width depends on 
+    table size, column cardinality, and query patterns.
+    
+    **Key consideration**: Wider indexes provide better coverage but 
+    consume more space. Find the sweet spot per table.
+    
+    **Avoid**: Fixed width for all tables; unbounded width growth.
+    
+    ## IMPLEMENTATION REQUIREMENTS
+    
+    - **Cost caching**: Essential - JOB has large tables
+    - **Full budget**: Use 1990+/2000 MB
+    - **Preserve what works**: Keep table prioritization and join key awareness
+    - **Time limit**: Stay under 500s total selection time
+    
+    ## CONSTRAINTS (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 2000.0,
+    ) -> Set[Index]:
+    ```
+    
+    **Hard constraints:** Storage <= 2000MB, Count <= 15
+    **Goal:** Beat 52.1% cost reduction!
+    
+    Return ONLY the evolved function code. The breakthrough came from 
+    combining multiple techniques creatively - keep innovating!
+
+  num_top_programs: 3
+  num_diverse_programs: 3
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 120
+  num_islands: 4
+  migration_interval: 12
+  migration_rate: 0.12
+  elite_selection_ratio: 0.12
+  exploration_ratio: 0.40
+  exploitation_ratio: 0.48
+  feature_dimensions:
+    - "query_cost_reduction"
+    - "num_indexes"
+  feature_bins: 10
+
+evaluator:
+  timeout: 600
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 1
+  use_llm_feedback: false
+
+eval_benchmark: "job"

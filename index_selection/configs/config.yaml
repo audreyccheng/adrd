@@ -1,0 +1,369 @@
+# OpenEvolve Configuration for Index Selection Optimization
+# ===========================================================
+# This configuration guides OpenEvolve to evolve better index selection algorithms
+# starting from the AutoAdmin baseline (Chaudhuri & Narasayya 1997)
+
+# General settings
+output_dir: "outputs/default"    # Overridden by run_openevolve.py to outputs/{config}_{initial}/
+max_iterations: 100             # Number of evolution iterations (increased for more exploration)
+checkpoint_interval: 10          # Save checkpoints every N iterations (less frequent)
+log_level: "INFO"                # Logging level (DEBUG, INFO, WARNING, ERROR)
+log_dir: null                    # Custom log directory (default: output_dir/logs)
+random_seed: 42                  # Random seed for reproducibility
+
+# Evolution settings
+diff_based_evolution: true       # Use diff-based evolution (more efficient)
+max_code_length: 40000          # Maximum allowed code length in characters
+
+# Early stopping
+early_stopping_patience: 30      # Stop after 30 iterations without improvement (prevent wasted compute)
+convergence_threshold: 0.002     # Minimum improvement to reset patience (0.2% - stricter)
+early_stopping_metric: "combined_score"
+
+# LLM configuration
+llm:
+  # Model ensemble (weighted random selection)
+  models:
+    - name: "gpt-5"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5?api-version=2024-12-01-preview"
+  
+  # Generation parameters
+  temperature: 0.85              # Increased creativity for more exploration (was 0.7)
+  top_p: 0.95                   # Nucleus sampling
+  max_tokens: 16000             # Maximum tokens to generate
+  
+  # Request parameters
+  timeout: 300                  # API timeout in seconds
+  retries: 3                    # Number of retries
+  retry_delay: 5                # Delay between retries
+
+# Prompt configuration
+prompt:
+  template_dir: null            # Custom prompt templates directory
+  
+  # System message: Domain expertise and guidance for LLM
+  system_message: |
+    You are an expert in database index selection and query optimization algorithms.
+    Your task is to evolve the select_best_indexes() function to find better index
+    configurations that minimize query execution cost while respecting storage constraints.
+    
+    ## PROBLEM CONTEXT
+    
+    **Index Selection Problem:**
+    - Input: A database workload (set of SQL queries)
+    - Goal: Select a set of indexes to minimize total query execution cost
+    - Constraints: 
+      * Storage budget (500 MB) - HARD CONSTRAINT (violations = zero score)
+      * Maximum number of indexes (15) - HARD CONSTRAINT (violations = zero score)
+      * Candidate indexes are pre-generated from query predicates
+    
+    **Current Baseline (AutoAdmin Algorithm):**
+    1. **Naive Enumeration (Seed)**: Exhaustively try all combinations of m indexes (m=1)
+       to find the best small configuration
+    2. **Greedy Expansion**: Iteratively add the index that provides the highest marginal
+       benefit until reaching max_indexes or no improvement
+    
+    ## LIMITATIONS OF CURRENT APPROACH
+    
+    ❌ **Exhaustive enumeration** becomes intractable with many candidates
+    ❌ **Greedy selection** is susceptible to local optima (no backtracking)
+    ❌ **No exploration** of alternative paths once committed to a choice
+    ❌ **Simple cost oracle** doesn't account for index interaction effects
+    ❌ **Fixed strategy** doesn't adapt to workload characteristics
+    
+    ## YOUR TASK: EVOLVE THE SELECTION STRATEGY
+    
+    You must improve the select_best_indexes() function to achieve:
+    - **Higher cost reduction** (primary goal: 80% weight)
+    - **ZERO CONSTRAINT VIOLATIONS** (any violation = score of 0.0)
+    - **NON-EMPTY SOLUTIONS** (empty sets score ~0.20, very poor!)
+    - **Reasonable selection time** (tracked but not heavily weighted)
+    
+    **Scoring Examples:**
+    ```
+    Constraint-violating solution:  score = 0.0000  ❌ WORST
+    Empty set (0 indexes):          score ≈ 0.2000  ❌ VERY BAD
+    Single good index (5% cost↓):   score ≈ 0.2400  ⚠️  BETTER
+    Multiple indexes (7% cost↓):    score ≈ 0.2560  ✅ GOOD
+    ```
+    
+    Empty sets are only marginally better than constraint violations!
+    Always try to return SOMETHING useful.
+    
+    ## OPTIMIZATION OPPORTUNITIES
+    
+    ### 1. Heuristics and Prioritization
+    
+    **Index Quality Metrics:**
+    - **Frequency**: Prioritize indexes on frequently queried columns
+    - **Selectivity**: High-selectivity predicates benefit more from indexes
+    - **Size vs Benefit**: Consider benefit per MB of storage
+    - **Query Coverage**: Indexes that benefit multiple queries
+    - **Redundancy Detection**: Avoid overlapping index coverage
+    
+    **Candidate Ordering:**
+    - Sort by expected benefit before evaluation
+    - Use lightweight proxy metrics to avoid expensive cost evaluations
+    - Cache cost evaluations to avoid redundant work
+    
+    ### 2. Search Strategies (Try Different Approaches!)
+    
+    **Beyond Greedy Search:**
+    - **Beam Search**: Maintain top-K candidates at each step, explore multiple paths
+    - **Simulated Annealing**: Accept worse solutions with decreasing probability
+    - **Genetic Algorithms**: Combine index sets, mutate, select fittest
+    - **A* Search**: Use heuristic to guide search toward promising areas
+    - **Random Restarts**: Multiple independent searches from different seeds
+    - **Tabu Search**: Remember recently explored solutions, avoid revisiting
+    
+    **Hybrid Approaches:**
+    - Start with exhaustive search on small subset
+    - Switch to greedy for expansion
+    - Finish with local hill-climbing (swaps/drops)
+    - Use different strategies for different workload sizes
+    
+    ### 3. Early Stopping and Efficiency
+    
+    **Avoid Unnecessary Work:**
+    - Stop when marginal benefit < threshold (e.g., 1% improvement)
+    - Use cost upper bounds to prune bad candidates early
+    - Batch evaluate similar configurations
+    - Time-box expensive evaluations (e.g., max 5 minutes)
+    
+    ### 4. Workload-Aware Strategies
+    
+    **Adapt to Workload Characteristics:**
+    - If few candidates: exhaustive enumeration may be feasible
+    - If many candidates: use aggressive pruning/sampling
+    - If queries are similar: indexes with high overlap are valuable
+    - If queries are diverse: need broader index coverage
+    
+    ### 5. Advanced Techniques (Explore These!)
+    
+    **Index Interaction Modeling:**
+    - Some indexes work well together (complementary)
+    - Some indexes are redundant (overlapping benefit)
+    - Model interactions, not just individual benefits
+    
+    **Adaptive Strategies:**
+    - Adjust search depth based on candidate count
+    - Use exhaustive for small sets (<10 candidates)
+    - Use sampling for large sets (>50 candidates)
+    - Time-box to stay within reasonable limits
+    
+    ## CONSTRAINTS (DO NOT CHANGE - VIOLATIONS WILL BREAK THE SYSTEM)
+    
+    ❌❌❌ **CRITICAL: FUNCTION SIGNATURE MUST BE PRESERVED EXACTLY** ❌❌❌
+    
+    The function signature MUST remain EXACTLY as follows:
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    **CRITICAL RULES:**
+    1. ✅ DO accept candidate_indexes as the SECOND parameter
+    2. ✅ DO use the provided candidate_indexes (do NOT generate new ones)
+    3. ✅ DO preserve all parameter names, types, and order
+    4. ✅ DO return Set[Index]
+    5. ❌ DO NOT add or remove parameters
+    6. ❌ DO NOT change parameter order
+    7. ❌ DO NOT generate candidates inside the function
+    8. ❌ DO NOT call workload.potential_indexes() - use candidate_indexes instead
+    9. ❌ DO NOT change the cost_evaluation interface
+    
+    **WHY THIS MATTERS:**
+    The calling code expects this exact signature. Any change will cause
+    immediate execution failure and a score of 0.0.
+    
+    ❌ **Input/Output:**
+    - Must accept the same parameters in the same order
+    - Must return Set[Index] (not list, not tuple)
+    - Cannot modify candidate generation
+    - Cannot change the cost_evaluation interface
+    
+    ❌ **Constraints to Respect:**
+    - Total index size <= budget_MB * 1024 * 1024 bytes (HARD - violations = 0.0 score) (500 MB default)
+    - Number of indexes <= max_indexes (HARD - violations = 0.0 score) (15 indexes max default)
+    - Selected indexes must be from candidate_indexes
+    
+    ## ALLOWED CHANGES (EVOLVE THESE)
+    
+    ✅ **Selection Algorithm:**
+    - Replace greedy with any search strategy
+    - Add multiple phases (seed + refinement)
+    - Use randomization and restarts
+    
+    ✅ **Evaluation Strategy:**
+    - Change order of candidate evaluation
+    - Use proxy metrics before full cost evaluation
+    - Cache and reuse cost evaluations
+    
+    ✅ **Heuristics:**
+    - Add scoring functions for candidates
+    - Implement pruning rules
+    - Use workload statistics
+    
+    ✅ **Efficiency:**
+    - Add early stopping conditions
+    - Parallelize independent evaluations (if possible)
+    - Reduce redundant cost evaluations
+    
+    ✅ **Robustness:**
+    - Handle missing index sizes gracefully (use default estimate)
+    - Include fallback strategies when primary search fails
+    - Never return empty set when valid candidates exist
+    - Prefer returning SOMETHING over returning NOTHING
+    
+    ## EVALUATION METRICS
+    
+    Your algorithm will be evaluated on TPC-H queries with these metrics:
+    
+    - **query_cost_reduction** (80% weight): (baseline_cost - optimized_cost) / baseline_cost
+    - **constraint_score**: 1.0 if constraints satisfied, 0.0 otherwise (HARD)
+    - **combined_score**: 0.0 if constraints violated, else 0.80 × cost_reduction + 0.20
+    
+    **ANY CONSTRAINT VIOLATION = SCORE OF 0.0 (complete rejection)**
+    
+    ## CRITICAL: AVOID EMPTY SETS! ⚠️
+    
+    **DO NOT return empty sets unless absolutely necessary!**
+    
+    Empty sets score VERY poorly (~0.20) even though they satisfy constraints.
+    A single good index is MUCH better than no indexes.
+    
+    **Required Behavior:**
+    - If your primary strategy finds nothing, use a FALLBACK strategy
+    - Pick at least 1-2 high-quality indexes using proxy metrics
+    - Only return empty set if NO candidates provided or budget is 0
+    - Test your logic: does it handle edge cases without returning empty?
+    
+    **Common Bugs to Avoid:**
+    ```python
+    # ❌ BAD: Returns empty if filtering is too aggressive
+    filtered = [idx for idx in candidates if some_strict_condition]
+    if not filtered:
+        return set()  # DON'T DO THIS!
+    
+    # ✅ GOOD: Has fallback strategy
+    filtered = [idx for idx in candidates if some_strict_condition]
+    if not filtered:
+        filtered = list(candidates)[:min(10, len(candidates))]  # Use top candidates as fallback
+    
+    # ❌ BAD: Returns empty if no improvement found
+    if best_cost >= baseline_cost:
+        return set()  # DON'T DO THIS!
+    
+    # ✅ GOOD: Returns best found even if no improvement
+    if best_cost >= baseline_cost:
+        # Still return best indexes found (better than nothing)
+        return best_indexes if best_indexes else fallback_indexes
+    ```
+    
+    **Sanity Check Before Returning:**
+    Before `return`, ask: "Am I returning empty when I could return something useful?"
+    
+    ## RESPONSE FORMAT
+    
+    Return ONLY the evolved select_best_indexes() function code.
+    Include brief comments explaining your strategy.
+    Do NOT include explanatory text outside the code.
+    Do NOT change the function signature.
+    
+    Focus on improving the combined_score through better index selection strategies!
+    
+    ## FINAL CHECKLIST BEFORE SUBMITTING CODE
+    
+    ❌ Does my code return empty set in edge cases? (FIX IT!)
+    ✅ Does my code have fallback logic when primary strategy fails?
+    ✅ Does my code handle missing/None estimated_size values?
+    ✅ Does my code return at least 1-2 indexes when candidates exist?
+    ✅ Does my code preserve the exact function signature?
+    ✅ Does my code respect hard constraints (budget, max_indexes)?
+  
+  # Evaluator feedback (for LLM-based code review)
+  evaluator_system_message: |
+    You are an expert code reviewer specializing in database optimization algorithms.
+    Evaluate the quality of the index selection algorithm.
+    
+    Check for:
+    - Correctness: Returns valid set of indexes
+    - Constraints: Respects storage budget and max_indexes
+    - Efficiency: Runs in reasonable time
+    - Code quality: Clean, readable, maintainable
+  
+  # Number of example programs to include in prompt
+  num_top_programs: 3           # Top-performing programs
+  num_diverse_programs: 2       # Diverse programs for exploration
+  
+  # Template stochasticity (randomized phrasing for diversity)
+  use_template_stochasticity: true
+  template_variations:
+    improvement_suggestion:
+      - "Here's how we could improve this code:"
+      - "I suggest the following improvements:"
+      - "We can enhance this code by:"
+      - "Consider this optimization:"
+  
+  # Artifact rendering (execution feedback)
+  include_artifacts: true       # Include errors/warnings in prompt
+  max_artifact_bytes: 20480     # Max artifact size (20KB)
+  artifact_security_filter: true
+
+# Database configuration (MAP-Elites quality-diversity)
+database:
+  # General settings
+  db_path: null                 # Persist to disk (null = in-memory)
+  in_memory: true               # Keep in memory for speed
+  log_prompts: true            # Log all prompts/responses
+  
+  # Population parameters
+  population_size: 500          # Max programs in memory
+  archive_size: 100             # Elite archive size
+  num_islands: 3                # Islands for parallel evolution
+  
+  # Island migration (share best solutions between islands)
+  migration_interval: 10        # Migrate every N generations
+  migration_rate: 0.1           # Fraction of top programs to migrate (10%)
+  
+  # Selection parameters
+  elite_selection_ratio: 0.15   # Select from top 15% (broader elite, more diversity)
+  exploration_ratio: 0.3        # 30% exploration vs exploitation (more random search)
+  exploitation_ratio: 0.6       # 60% exploitation vs random (less greedy convergence)
+  
+  # Feature map for MAP-Elites (quality-diversity)
+  # These are for DIVERSITY, not fitness
+  feature_dimensions:           
+    - "complexity"              # Built-in: code length
+    - "diversity"               # Built-in: structural diversity
+    # Could add custom features like "num_indexes" or "selection_time"
+    # but these would need to be returned by evaluator
+  
+  feature_bins: 10              # Number of bins per dimension
+  diversity_reference_size: 20  # Reference set size for diversity
+
+# Evaluator configuration
+evaluator:
+  # General settings
+  timeout: 600                  # 10 minute timeout per evaluation
+  max_retries: 3                # Retry failed evaluations
+  
+  # Cascade evaluation (fast filter → full eval)
+  cascade_evaluation: false     # Disable for AutoAdmin (takes >30s to run)
+  cascade_thresholds:           # Thresholds to advance to next stage
+    - 0.3                       # Stage 1: Quick filter (30s timeout)
+    - 0.6                       # Stage 2: Full eval (600s timeout)
+  
+  # Parallel evaluation
+  parallel_evaluations: 4       # Evaluate 4 programs in parallel
+  
+  # LLM-based feedback (experimental)
+  use_llm_feedback: false       # Use LLM to review code quality
+  llm_feedback_weight: 0.0      # Weight of LLM feedback in score
+

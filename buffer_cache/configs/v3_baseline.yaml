@@ -1,0 +1,35 @@
+name: v3_baseline
+expose_usage_count: true
+expose_access_count: false
+expose_last_access_time: false
+expose_dirty_time: false
+expose_is_dirty: true
+expose_block_group: false
+expose_scan_ids: false
+enable_estimator: false
+enable_confidence: false
+enable_block_group_estimate: false
+policy_sees_scan_context: false
+block_group_size: 128
+simulate_hint_bit_dirtying: false
+simulate_ring_buffers: true
+bgwriter_coverage: 0.0
+max_usage_count: 5
+workload_weights:
+  tpch_full: 0.5
+  tpcc_10w: 0.5
+workload_params: {}
+scoring_mode: hit_rate
+dirty_penalty_weight: 0.0
+reeviction_penalty_weight: 0.0
+wal_cost_enabled: false
+latency_model:
+  ssd_random_read_us: 100.0
+  ssd_random_write_us: 200.0
+  ssd_seq_read_us: 20.0
+  memory_hit_us: 0.1
+artifact_suggestions: false
+per_workload_breakdown: false
+inner_iterations: 50
+inner_population_size: 40
+inner_num_islands: 3

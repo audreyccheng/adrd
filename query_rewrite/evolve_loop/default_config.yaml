@@ -1,0 +1,19 @@
+# Evolution Loop Configuration
+# Override defaults from evolve_loop/config.py
+
+# Search parameters
+search_timeout_sec: 120
+search_parallelism: 4
+
+# Validation
+validation_runs: 5
+regression_threshold: 0.95
+win_threshold: 1.10
+
+# Claude API
+model: "claude-sonnet-4-20250514"
+max_tokens: 32768
+
+# Loop control
+max_iterations: 20
+max_fix_attempts: 3

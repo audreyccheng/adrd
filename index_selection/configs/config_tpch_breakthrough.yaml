@@ -1,0 +1,163 @@
+# OpenEvolve Configuration - TPC-H Breakthrough Attempt
+# =====================================================
+# GOAL: Break through the 43.8% ceiling
+#
+# Current state:
+# - Best baseline: anytime (43.3%)
+# - Best evolved: all_ideas_extend (43.83%) - found at iteration 5!
+# - All algorithms converge to 43.0-43.8% range
+#
+# Strategy: High exploration, novel approaches, acknowledge ceiling
+
+output_dir: "outputs/tpch_breakthrough"
+max_iterations: 150
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 42
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 50
+convergence_threshold: 0.001
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.95
+  top_p: 0.98
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## CHALLENGE: BREAK THE 43.8% CEILING ON TPC-H
+    
+    **Current best: 43.83% cost reduction** - achieved by multiple algorithms.
+    All standard approaches converge here. Your goal: Find a NOVEL approach.
+    
+    ## TPC-H WORKLOAD PROFILE (18 queries, 500MB budget)
+    
+    | Table | Query Coverage | Rows | Notes |
+    |-------|----------------|------|-------|
+    | **lineitem** | 70% | 6M | 🔥 Main fact table |
+    | **orders** | 58% | 1.5M | 🔥 Key joins with lineitem |
+    | partsupp | 25% | 800K | Medium priority |
+    | customer | 20% | 150K | Lower priority |
+    | part | 18% | 200K | Selective queries |
+    | supplier | 15% | 10K | Small, low priority |
+    
+    ## APPROACHES THAT HIT THE CEILING (don't repeat!)
+    
+    ❌ Greedy + benefit-per-byte → 42.7%
+    ❌ Greedy + local swap → 43.3%
+    ❌ Multi-seed greedy → 43.3%
+    ❌ Simulated annealing → 43.5%
+    ❌ Kick-and-refill → 43.8%
+    ❌ Random restarts (2-5 seeds) → 43.8%
+    
+    All these converge to selecting similar indexes!
+    
+    ## TOP 3 NOVEL IDEAS TO EXPLORE
+    
+    ### 1. INDEX INTERACTION MODELING 🔬 (MOST PROMISING)
+    
+    **Goal**: Discover synergistic and redundant index pairs.
+    
+    **Insight**: Current algorithms treat indexes independently, but they 
+    interact! Two indexes might be redundant (both cover same queries) or 
+    synergistic (together they enable a better query plan than sum of parts).
+    
+    **Key consideration**: Compute pairwise interaction scores BEFORE 
+    greedy selection. Prefer synergistic pairs, avoid redundant ones.
+    
+    **Avoid**: Assuming independence; ignoring covering index overlap.
+    
+    ### 2. LOOK-AHEAD SEARCH 🔭 (ESCAPE GREEDY TRAPS)
+    
+    **Goal**: Avoid myopic greedy decisions that block better futures.
+    
+    **Insight**: The locally best index might prevent adding an even 
+    better combination later. Before adding index X, simulate adding 
+    X + best_remaining and score based on 2-step outcome.
+    
+    **Key consideration**: Limit look-ahead to top-10 candidates for 
+    speed. The goal is to find indexes that "set up" good future additions.
+    
+    **Avoid**: Full exhaustive search (too slow); pure greedy (ceiling).
+    
+    ### 3. QUERY CLUSTERING + PARTITIONED OPTIMIZATION 📊
+    
+    **Goal**: Optimize for query groups separately, then merge.
+    
+    **Insight**: TPC-H queries fall into natural clusters (date range 
+    scans, joins, aggregations). Allocating budget to each cluster and 
+    optimizing independently may find indexes that global competition hides.
+    
+    **Key consideration**: Cluster by table access patterns or query 
+    structure. Resolve conflicts by keeping higher-impact indexes.
+    
+    **Avoid**: Treating all queries as one homogeneous group.
+    
+    ## HARD CONSTRAINTS (must satisfy)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 20,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    - Storage: MUST be <= 500MB
+    - Count: MUST be <= 20 indexes (increased from 15!)
+    - Time: Keep under 120 seconds (cache cost evaluations!)
+    
+    ## SUCCESS METRIC
+    
+    You succeed if cost_reduction > 43.83%. Even 44.0% would be a breakthrough.
+    
+    Return ONLY the evolved function code. Be creative and unconventional!
+
+  num_top_programs: 3
+  num_diverse_programs: 3
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 150
+  num_islands: 5
+  migration_interval: 15
+  migration_rate: 0.15
+  elite_selection_ratio: 0.10
+  exploration_ratio: 0.45
+  exploitation_ratio: 0.45
+  feature_dimensions:
+    - "query_cost_reduction"
+    - "num_indexes"
+    - "storage_used_mb"
+  feature_bins: 12
+
+evaluator:
+  timeout: 300
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 1
+  use_llm_feedback: false
+
+eval_benchmark: "tpch"

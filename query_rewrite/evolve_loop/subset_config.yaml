@@ -1,0 +1,62 @@
+# Evolution Loop Configuration - Subset Evaluation
+# Uses curated 30-query subset (10 TPC-H + 20 DSB) for ~4x faster evaluation.
+# Captures ALL latency wins from evolve_loop validation (iter_004),
+# plus latency regression canaries and representative ties.
+# Only latency-based results matter — cost-only wins are excluded.
+
+# Search parameters
+search_timeout_sec: 120
+search_parallelism: 4
+
+# Validation
+validation_runs: 5
+regression_threshold: 0.95
+win_threshold: 1.10
+
+# Claude API
+model: "claude-sonnet-4-20250514"
+max_tokens: 32768
+
+# Loop control
+max_iterations: 20
+max_fix_attempts: 3
+
+# Query subset: only evaluate these queries (1 variant per template)
+query_subset:
+  tpch:
+    # Tier 1: latency wins
+    - query2_0     # 6.7x
+    - query5_0     # 1.15x
+    - query7_0     # 1.28x
+    - query9_0     # 1.14x
+    - query12_0    # 1.37x
+    - query18_0    # 1.43x
+    - query22_0    # 1458x
+    # Tier 2: latency regression canaries
+    - query15_0    # 0.55x regression
+    - query16_0    # 0.63x regression
+    # Tier 3: representative ties
+    - query1_0     # Single-table agg, no subq
+  dsb:
+    # Tier 1: latency wins
+    - query001_0   # 2.95x
+    - query010_0   # 1.22x
+    - query027_0   # 1.13x
+    - query032_0   # 5.0x
+    - query039_0   # 32.9x
+    - query040_0   # 1.20x
+    - query054_0   # 2428x
+    - query065_0   # 1.87x
+    - query069_0   # 2.0x
+    - query080_0   # 1.35x
+    - query081_0   # 3230x
+    - query091_0   # 1.11x
+    - query092_0   # 1.46x
+    - query099_0   # 1.24x
+    # Tier 2: latency regression canaries
+    - query023_0   # 0.14x severe regression
+    - query025_0   # 0.82x regression
+    - query059_0   # 0.70x regression
+    # Tier 3: representative ties
+    - query014_0   # Complex multi-subquery
+    - query050_0   # CTE + window functions

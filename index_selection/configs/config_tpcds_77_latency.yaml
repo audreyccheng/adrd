@@ -1,0 +1,196 @@
+# OpenEvolve Configuration - TPC-DS 77-Query LATENCY Evolution
+# ==============================================================
+# Uses ACTUAL LATENCY as fitness signal instead of cost estimates.
+# 
+# KEY INSIGHT: PostgreSQL cost estimates do NOT predict latency for TPC-DS
+# - Direction agreement: only 59% (barely better than random)
+# - 22 queries (34% of workload) have INVERSE correlation
+# - Cost-based evolution actively moves AWAY from good solutions
+#
+# SOLUTION: Use actual latency, skip pathological slow queries
+# - Skip Q5 (1457s) and Q56 (605s) - 88% of time, 0.2% of workload
+# - Evaluate 77/79 queries with true latency (~6 min/iteration)
+# - 99.8% workload coverage, minimal overfit risk
+#
+# Expected: ~50 iterations × 6 min = ~5 hours (overnight run)
+# Baseline to beat: autoadmin +8.1% latency reduction
+
+output_dir: "outputs/tpcds_77_latency"
+max_iterations: 50
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 301
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 30
+convergence_threshold: 0.002
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.85
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## PROBLEM: SELECT INDEXES FOR TPC-DS WORKLOAD
+    
+    TPC-DS characteristics (77 queries evaluated, 500MB budget, 25 tables):
+    - **date_dim** appears in 84% of queries - CRITICAL dimension table
+    - **store** appears in 73% of queries - key filter dimension
+    - **store_sales** is main fact table (68% of queries)
+    - Three fact tables: store_sales, catalog_sales, web_sales
+    - Complex schema with 25 tables
+    - **~240 candidate indexes** generated from workload
+    
+    ⚠️ IMPORTANT: This evolution uses ACTUAL LATENCY as fitness!
+    The fitness signal is the real query execution time reduction, not cost estimates.
+    PostgreSQL cost estimates are unreliable for TPC-DS.
+    
+    ## ⚠️ CRITICAL: ALGORITHM COMPLEXITY REQUIREMENTS
+    
+    Your algorithm MUST complete in < 5 minutes on 79 queries with 240 candidates.
+    
+    ### 🚫 FORBIDDEN PATTERNS (will timeout - DO NOT USE!)
+    
+    ```python
+    # ❌ NEVER DO THIS - O(n^k) exponential complexity!
+    for combo in itertools.combinations(candidates, k):  # FORBIDDEN
+        cost = evaluate(combo)
+    
+    # ❌ NEVER DO THIS - O(n^k) exponential!
+    for combo in itertools.permutations(candidates, k):  # FORBIDDEN
+    
+    # ❌ NEVER enumerate all subsets
+    for subset in powerset(candidates):  # FORBIDDEN
+    ```
+    
+    With 240 candidates, combinations(240, 2) = 28,680 evaluations.
+    combinations(240, 3) = 2,280,880 evaluations. THIS WILL TIMEOUT!
+    
+    ### ✅ REQUIRED: O(n²) or better complexity
+    
+    ```python
+    # ✅ GOOD: Greedy selection - O(n × max_indexes)
+    selected = set()
+    for _ in range(max_indexes):
+        best = max(candidates - selected, key=lambda c: marginal_benefit(c, selected))
+        if marginal_benefit(best, selected) > 0:
+            selected.add(best)
+    
+    # ✅ GOOD: Single-pass scoring - O(n)
+    scored = [(idx, score(idx)) for idx in candidates]
+    selected = sorted(scored, key=lambda x: -x[1])[:max_indexes]
+    
+    # ✅ GOOD: Beam search with fixed width - O(n × beam_width)
+    ```
+    
+    ## TECHNIQUES TO CONSIDER
+    
+    ### Greedy marginal benefit (RECOMMENDED)
+    Add one index at a time based on marginal cost reduction.
+    
+    ### Benefit-per-byte ranking
+    Score indexes by cost_reduction / size, select top-k.
+    
+    ### Dimension table awareness
+    date_dim (84% of queries) and store (73%) are high-value targets.
+    
+    ### Full budget utilization
+    Solutions using 499+/500 MB tend to outperform conservative ones.
+    
+    ## PATTERNS TO AVOID
+    
+    ❌ `itertools.combinations` on candidate sets (EXPONENTIAL!)
+    ❌ `itertools.permutations` on candidate sets (EXPONENTIAL!)
+    ❌ Nested loops evaluating all pairs/triples of candidates
+    ❌ Under-utilizing budget
+    
+    ## ⚠️ CRITICAL: SIZE ESTIMATION REQUIREMENT
+    
+    When calling `cost_evaluation.calculate_cost()`, you MUST use `store_size=True`
+    at least once per index to populate `idx.estimated_size`. This is REQUIRED for
+    constraint checking.
+    
+    ```python
+    # ✅ CORRECT: store_size=True populates idx.estimated_size
+    cost = cost_evaluation.calculate_cost(workload, {idx}, store_size=True)
+    
+    # ⚠️ DANGEROUS: store_size=False leaves idx.estimated_size = 0
+    cost = cost_evaluation.calculate_cost(workload, {idx}, store_size=False)
+    # If you use this for speed, you MUST manually set idx.estimated_size!
+    ```
+    
+    If all returned indexes have `estimated_size = 0`, the storage constraint check
+    will be incorrect and your solution may be penalized or rejected.
+    
+    ## CONSTRAINTS (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    **Hard constraints:** Storage <= 500MB, Count <= 15
+    
+    Return ONLY the evolved function code.
+
+  num_top_programs: 3
+  num_diverse_programs: 2
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 100
+  num_islands: 3
+  migration_interval: 10
+  migration_rate: 0.1
+  elite_selection_ratio: 0.15
+  exploration_ratio: 0.30
+  exploitation_ratio: 0.60
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 10
+
+evaluator:
+  timeout: 900             # 15 min timeout (latency eval takes ~6 min)
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 1
+  use_llm_feedback: false
+
+# Use TPC-DS 77-query latency evaluation
+eval_benchmark: "tpcds_77"
+
+# Environment variables for latency-based fitness
+# These will be set when running the evolution:
+#   USE_TPCDS_LATENCY_FITNESS=true    # Enable latency fitness
+#   TPCDS_SKIP_QUERIES="5,56"         # Skip pathological queries
+#   TPCDS_QUERY_TIMEOUT=300           # 5 min per-query timeout
+
+
+
+

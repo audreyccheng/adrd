@@ -1,0 +1,101 @@
+# OpenEvolve Configuration - Index Interactions
+# ==============================================
+# Key insight: Indexes interact. The best set ≠ set of best individuals.
+
+output_dir: "outputs/index_interactions"  # Overridden by run_openevolve.py
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 44
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 50
+convergence_threshold: 0.002
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.9
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## KEY INSIGHT: INDEXES INTERACT WITH EACH OTHER
+    
+    Current algorithms assume: "If index A gives 10% benefit alone, it gives ~10% in any set."
+    
+    **This is wrong!** Index benefits interact:
+    
+    - **Redundancy**: Index(a,b) and Index(a) help the same queries → diminishing returns
+    - **Synergy**: Index A helps Q1, Index B helps Q2, but together they enable a better join plan
+    
+    ## YOUR MISSION: MODEL INTERACTIONS
+    
+    Don't just pick the best individual indexes. Consider:
+    
+    1. **Re-evaluate marginal benefit**: After adding an index, the benefit of others changes
+    2. **Detect redundancy**: If two indexes help the same queries, prefer the more general one
+    3. **Look for synergy**: Some index combinations work better together than alone
+    
+    The key is: **the best INDEX SET is not the set of best INDIVIDUAL indexes**.
+    
+    ## CONSTRAINTS (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    - Storage: total_size <= budget_MB * 1024 * 1024 bytes
+    - Count: len(selected) <= max_indexes
+    - ANY constraint violation = score of 0.0
+    - Empty sets score poorly (~0.20) - always return something useful
+    
+    Return ONLY the evolved function code.
+
+  num_top_programs: 3
+  num_diverse_programs: 2
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 100
+  num_islands: 3
+  migration_interval: 10
+  migration_rate: 0.1
+  elite_selection_ratio: 0.15
+  exploration_ratio: 0.35
+  exploitation_ratio: 0.55
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 10
+
+evaluator:
+  timeout: 600
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 4
+  use_llm_feedback: false

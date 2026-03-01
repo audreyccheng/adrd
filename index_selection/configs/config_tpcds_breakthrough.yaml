@@ -1,0 +1,156 @@
+# OpenEvolve Configuration - TPC-DS Breakthrough Attempt
+# ======================================================
+# GOAL: Break through the 42.0% ceiling
+#
+# Current state:
+# - Best baseline: extend (41.3%)
+# - Best evolved: explore_extend_1215 (42.0%) - beats baseline by +0.7%
+# - Previous failed attempt: tpcds_only_db2advis (40.0%) - wrong starting point!
+#
+# Strategy: Apply proven JOB breakthrough techniques to TPC-DS
+
+output_dir: "outputs/tpcds_breakthrough"
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 301
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 50
+convergence_threshold: 0.002
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.90
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## CHALLENGE: BREAK THE 42.0% CEILING ON TPC-DS
+    
+    **Current best: 42.0% cost reduction** - achieved by explore_extend_1215.
+    Baseline extend gets 41.3%. Your goal: BEAT 42.0%!
+    
+    ## TPC-DS SCHEMA INSIGHTS (25 tables, 500MB budget)
+    
+    | Table | Query Coverage | Size | Notes |
+    |-------|----------------|------|-------|
+    | **date_dim** | 84% | Small | 🔥 CRITICAL - appears in almost every query |
+    | **store** | 73% | Small | 🔥 Key filter dimension |
+    | **store_sales** | 68% | HUGE | Main fact table - selective indexing |
+    | **item** | 45% | Medium | Good secondary target |
+    | **customer** | 35% | Medium | Lower priority |
+    | catalog_sales | 25% | HUGE | Low coverage, big table |
+    | web_sales | 20% | HUGE | Low coverage, big table |
+    
+    ## TOP 3 BREAKTHROUGH TECHNIQUES
+    
+    ### 1. TABLE-WEIGHTED SELECTION 🎯 (MOST PROMISING)
+    
+    **Goal**: Prioritize indexes on tables that appear in most queries.
+    
+    **Insight**: Not all tables are equal. date_dim (84%) and store (73%) 
+    should get priority over catalog_sales (25%). Weight benefit scores 
+    by table query coverage before ranking.
+    
+    **Key consideration**: Large fact tables (store_sales, catalog_sales) 
+    need careful handling - high coverage doesn't mean high ROI if the 
+    table is huge.
+    
+    **Avoid**: Equal treatment of all tables; ignoring table size.
+    
+    ### 2. KICK-AND-REFILL ESCAPE 🦵 (ESCAPE LOCAL OPTIMA)
+    
+    **Goal**: Break out of greedy local optima by strategic removal.
+    
+    **Insight**: Greedy selection can get stuck. The least valuable index 
+    in your current solution may be blocking a better alternative. Remove 
+    it and greedily refill - you might find a better combination.
+    
+    **Key consideration**: Define "least valuable" carefully - consider 
+    both marginal contribution AND table importance.
+    
+    **Avoid**: Random removal; removing high-value indexes.
+    
+    ### 3. SURROGATE KEY DETECTION 🔗 (TPC-DS SPECIFIC)
+    
+    **Goal**: Recognize and prioritize join columns.
+    
+    **Insight**: TPC-DS uses `*_sk` (surrogate key) columns for ALL joins 
+    between fact and dimension tables. These columns are disproportionately 
+    valuable because they appear in join predicates.
+    
+    **Key consideration**: Also look for `*_id` columns and foreign key 
+    patterns. Multi-column indexes starting with join keys often outperform.
+    
+    **Avoid**: Treating all columns equally; ignoring join structure.
+    
+    ## IMPLEMENTATION REQUIREMENTS
+    
+    - **Cost caching**: Cache all cost evaluations - TPC-DS has 30+ queries
+    - **Full budget**: Use 499+/500 MB. Under-utilization correlates with failure.
+    - **All 15 slots**: Fill all index slots if beneficial
+    - **Time limit**: Keep under 300s total selection time
+    
+    ## CONSTRAINTS (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    **Hard constraints:** Storage <= 500MB, Count <= 15
+    **Goal:** Beat 42.0% cost reduction!
+    
+    Return ONLY the evolved function code. Be creative - the breakthrough 
+    may come from a completely novel approach!
+
+  num_top_programs: 3
+  num_diverse_programs: 3
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 120
+  num_islands: 4
+  migration_interval: 12
+  migration_rate: 0.12
+  elite_selection_ratio: 0.12
+  exploration_ratio: 0.40
+  exploitation_ratio: 0.48
+  feature_dimensions:
+    - "query_cost_reduction"
+    - "num_indexes"
+  feature_bins: 10
+
+evaluator:
+  timeout: 600
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 1
+  use_llm_feedback: false
+
+eval_benchmark: "tpcds"

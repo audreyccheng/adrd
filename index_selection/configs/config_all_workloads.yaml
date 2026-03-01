@@ -1,0 +1,176 @@
+# OpenEvolve Configuration - Universal All-Workloads
+# ==================================================
+# DISTILLED INSIGHTS from specialized evolution runs:
+# - job_only_explore_extend: 52.1% on JOB (breakthrough)
+# - tpcds_only_explore_extend: 42.0% on TPC-DS
+# - explore_extend_1215: 42.9% avg (best generalizer)
+#
+# These insights generalize across TPC-H, TPC-DS, and JOB workloads.
+
+output_dir: "outputs/all_workloads"
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 203
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 50
+convergence_threshold: 0.002
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.85
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## PROBLEM: UNIVERSAL INDEX SELECTION FOR ANY WORKLOAD
+    
+    Your algorithm must work well across different database schemas:
+    - **TPC-H**: Star schema, 18 queries, 500MB budget (lineitem dominant)
+    - **TPC-DS**: Star schema, 79 queries, 500MB budget (fact tables + dimensions)
+    - **JOB/IMDB**: Normalized schema, 33 queries, 2000MB budget (title central)
+    
+    ## 8 KEY INSIGHTS FROM EVOLUTION (PROVEN TO WORK)
+    
+    ### 1. MAXIMIZE BUDGET UTILIZATION (>95%)
+    Winners use 98-99% of budget. Programs using <50% budget FAIL.
+    Add a final "budget fill" phase that adds beneficial indexes until budget is nearly full.
+    
+    ### 2. PRIORITIZE JOIN KEY COLUMNS (+10-15% weight)
+    Join operations dominate query cost. Detect and boost columns that are likely join keys:
+    - Columns ending in `_id` (IMDB pattern: movie_id, person_id)
+    - Columns ending in `_sk` (TPC-DS pattern: d_date_sk, ss_sold_date_sk)
+    - Columns ending in `key` or named `id`
+    ```python
+    if col_name.endswith('_id') or col_name.endswith('_sk') or col_name == 'id':
+        weight *= 1.10  # +10% boost
+    ```
+    
+    ### 3. WEIGHT TABLES BY QUERY COVERAGE
+    Tables appearing in more queries deserve priority. Compute coverage dynamically:
+    ```python
+    table_coverage = {}  # table -> fraction of queries using it
+    for query in workload.queries:
+        for table in query.tables:
+            table_coverage[table] = table_coverage.get(table, 0) + 1/len(queries)
+    # Use coverage as weight multiplier (1.0-1.5x range)
+    ```
+    
+    ### 4. PENALIZE OVERSIZED TABLES (0.5-0.85x weight)
+    Large tables produce huge indexes that consume budget with diminishing returns.
+    - If table has >10M rows or index >100MB with low benefit: penalty 0.4-0.65x
+    - Be conservative unless benefit-per-byte is clearly high
+    ```python
+    if index_size > 100_000_000 and benefit_ratio < 1e-6:
+        score *= 0.4  # Heavy penalty for huge low-value indexes
+    ```
+    
+    ### 5. ADAPTIVE INDEX WIDTH BY TABLE SIZE
+    - **Large tables (>5M rows)**: Max width 2 (narrow indexes save space)
+    - **Medium tables**: Max width 3
+    - **Small/dimension tables**: Max width 4 (covering indexes help)
+    ```python
+    if table_rows > 5_000_000:
+        max_width = 2
+    elif table_rows > 500_000:
+        max_width = 3
+    else:
+        max_width = 4
+    ```
+    
+    ### 6. MULTI-PHASE SELECTION PIPELINE
+    Each phase escapes different types of local optima:
+    1. **Greedy Add**: Build initial solution with benefit-per-byte ranking
+    2. **Prefix Extension**: Extend existing indexes (up to max_width)
+    3. **Swap Search**: Try replacing indexes with better alternatives (1 round)
+    4. **Simulated Annealing**: Short burst (8-10 steps) to escape local optima
+    5. **Kick-and-Refill**: Remove worst-contributing index, rebuild greedily
+    6. **Budget Fill**: Add any beneficial index until budget ~98% full
+    
+    ### 7. PAIR SYNERGY EXPLORATION
+    Some index pairs have super-additive benefits (enabling index-only scans, better joins).
+    Test top-8 candidates as pairs:
+    ```python
+    for i, idx_a in enumerate(top_candidates[:8]):
+        for idx_b in top_candidates[i+1:8]:
+            if adding_both improves cost:
+                add_both_to_solution()
+    ```
+    
+    ### 8. BENEFIT-PER-BYTE RANKING WITH WEIGHTS
+    Score each candidate index by: `score = (benefit × table_weight × join_key_weight) / size_bytes`
+    - Maintains a ranked pool of top-k candidates (k = max(64, 10*max_indexes))
+    - Cache cost evaluations to avoid redundant database calls
+    
+    ## PATTERNS TO AVOID
+    
+    ❌ Under-utilizing budget (<50% = guaranteed underperformance)
+    ❌ Ignoring join keys (they're 60%+ of query cost impact)
+    ❌ Fixed index width regardless of table size
+    ❌ Single-phase greedy-only selection (gets stuck in local optima)
+    ❌ Unbounded iteration loops (use max_iterations limits)
+    ❌ No cost caching (causes slow evaluation)
+    
+    ## CONSTRAINTS (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,  # Varies by benchmark
+    ) -> Set[Index]:
+    ```
+    
+    **Hard constraints:** Storage <= budget_MB, Count <= max_indexes
+    **Strategy:** Apply all 8 insights. Detect schema characteristics dynamically.
+    
+    Return ONLY the evolved function code.
+
+  num_top_programs: 3
+  num_diverse_programs: 2
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 100
+  num_islands: 3
+  migration_interval: 10
+  migration_rate: 0.1
+  elite_selection_ratio: 0.15
+  exploration_ratio: 0.30
+  exploitation_ratio: 0.60
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 10
+
+evaluator:
+  timeout: 1200  # 20 minutes
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 1
+  use_llm_feedback: false
+
+# Multi-workload evaluation (all benchmarks)
+eval_benchmark: "all"

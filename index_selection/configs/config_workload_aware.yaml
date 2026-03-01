@@ -1,0 +1,110 @@
+# OpenEvolve Configuration - Workload-Aware Selection
+# ====================================================
+# Key insight: Use workload statistics to prioritize candidates smartly.
+
+output_dir: "outputs/workload_aware"  # Overridden by run_openevolve.py
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 45
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 50
+convergence_threshold: 0.002
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.9
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## KEY INSIGHT: THE WORKLOAD TELLS YOU WHAT MATTERS
+    
+    Current algorithms treat all candidates equally. But the workload has useful signals:
+    
+    - **Column frequency**: Columns appearing in many queries are more valuable to index
+    - **Query weights**: Some queries may run 1000x more often (check query.frequency)
+    - **Table importance**: Tables touched by 80% of queries deserve more indexes
+    
+    ## YOUR MISSION: BE SMARTER ABOUT CANDIDATE ORDERING
+    
+    Before expensive cost evaluation, use cheap workload analysis:
+    
+    1. **Count column references**: Prioritize indexes on frequently-used columns
+    2. **Weight by query frequency**: If query.frequency exists, weight benefits accordingly  
+    3. **Consider benefit-per-MB**: Smaller indexes that help many queries are gold
+    
+    The key is: **use cheap heuristics to focus expensive evaluation on promising candidates**.
+    
+    ## WORKLOAD ACCESS
+    
+    ```python
+    workload.queries           # List of Query objects
+    query.columns              # Columns referenced by query
+    query.frequency            # Execution frequency (if available, else assume 1)
+    idx.columns                # Index columns tuple
+    idx.estimated_size         # Size in bytes (may be None - handle gracefully)
+    ```
+    
+    ## CONSTRAINTS (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    - Storage: total_size <= budget_MB * 1024 * 1024 bytes
+    - Count: len(selected) <= max_indexes
+    - ANY constraint violation = score of 0.0
+    - Empty sets score poorly (~0.20) - always return something useful
+    
+    Return ONLY the evolved function code.
+
+  num_top_programs: 3
+  num_diverse_programs: 2
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 100
+  num_islands: 3
+  migration_interval: 10
+  migration_rate: 0.1
+  elite_selection_ratio: 0.15
+  exploration_ratio: 0.35
+  exploitation_ratio: 0.55
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 10
+
+evaluator:
+  timeout: 600
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 4
+  use_llm_feedback: false

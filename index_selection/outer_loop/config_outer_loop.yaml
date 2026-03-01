@@ -1,0 +1,38 @@
+# Evaluator Outer Loop Configuration
+# ====================================
+# Automatically discovers the best evaluation metric for index selection
+# evolution by analyzing discrepancies between proxy metrics and actual latency.
+
+outer_loop:
+  max_iterations: 10          # Max outer loop iterations
+  benchmark: "tpch"           # Which benchmark for evaluation
+  convergence_spearman: 0.9   # Stop when ranking agreement exceeds this
+  convergence_noise: 0.05     # Stop when noise (std/mean) is below this
+  noise_check_runs: 3         # Repeated evaluations for noise measurement
+  output_dir: "outer_loop_outputs"
+  eval_timeout: 600           # Per-program evaluation timeout (seconds)
+
+llm:
+  api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  api_key_env: "GEMINI_API_KEY"  # Environment variable holding the API key
+  model: "gemini-2.5-pro"
+  temperature: 0.7
+  max_tokens: 8192
+
+ground_truth:
+  # Uses the interleaved latency evaluator with full noise-reduction protocol
+  evaluator: "evaluator_latency_interleaved.py"
+  num_runs: 3               # Runs per query for reliable measurement
+  prewarm: true              # Use pg_prewarm to pin data in shared_buffers
+  suppress_bg: true          # Force CHECKPOINT + disable autovacuum
+  cache_file: "ground_truth_cache.json"  # Cache results between runs
+
+corpus:
+  # Programs to evaluate — diverse set spanning baseline to best evolved
+  programs:
+    - "initial_programs/initial_program_autoadmin.py"
+    - "initial_programs/initial_program_extend.py"
+    - "initial_programs/initial_program_db2advis.py"
+    - "initial_programs/initial_program_anytime.py"
+    - "initial_programs/best_explore_extend_1215.py"
+    - "initial_programs/best_tpch_v3_extend_evolved.py"

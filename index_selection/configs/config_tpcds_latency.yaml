@@ -1,0 +1,141 @@
+# OpenEvolve Configuration - TPC-DS LATENCY-PRIMARY Evolution
+# ==============================================================
+# LATENCY-BASED FITNESS: Uses actual query execution time as the fitness metric
+#
+# Adapted from config_job_latency.yaml for TPC-DS workload.
+#
+# EVALUATOR: evaluator_latency_interleaved.py
+#   - Interleaved per-query warmup: warmup Q1 → measure Q1 → warmup Q2 → ...
+#   - pg_prewarm pins all tables+indexes in shared_buffers before measurement
+#   - CHECKPOINT + disable autovacuum during measurement
+#
+# PREREQUISITES:
+#   - All PostgreSQL instances: shared_buffers=8GB, work_mem=128MB,
+#     random_page_cost=1.1, jit=off (see setup_parallel_postgres.sh)
+#   - pg_prewarm and hypopg extensions installed on target database
+#   - TPC-DS database (benchbase_tpcds): SF=1, 25 tables, ~2.3GB
+#
+# SKIP QUERIES: Q0, Q5, Q56, Q63 — extremely slow with negligible index benefit
+#   - Q5:  ~32 min, 1.01x speedup, freq=75
+#   - Q56: ~11.6 min, 1.00x speedup (worse with indexes), freq=16
+#   → 75/79 queries evaluated, 99%+ workload coverage
+
+output_dir: "outputs/tpcds_latency"
+max_iterations: 30
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 301
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 50  # Extra patience for exploratory search with noisy latency
+convergence_threshold: 300   # Absolute: ~10% of typical TPC-DS score magnitude
+early_stopping_metric: "combined_score"  # = -latency_seconds
+
+llm:
+  api_base: "https://api.openai.com/v1"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+  temperature: 1.0   # Higher temp for more creative/diverse mutations
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## PROBLEM: SELECT INDEXES FOR TPC-DS WORKLOAD
+    
+    Fitness is measured by **actual query execution time** (latency), NOT cost estimates.
+    The cost model often overestimates benefit, so creative approaches that reduce
+    real execution time are more valuable than those that reduce estimated cost.
+    
+    - 75 queries evaluated (Q0/Q5/Q56/Q63 skipped), 500MB budget, 25 tables
+    - ~240 candidate indexes generated from workload
+    - **date_dim** appears in 84% of queries — CRITICAL dimension table
+    - **store** appears in 73% of queries — key filter dimension
+    - Three fact tables: store_sales (68%), catalog_sales, web_sales
+    - Complex star/snowflake schema with many dimension joins
+    
+    ## ALGORITHM COMPLEXITY REQUIREMENTS
+    
+    Your algorithm MUST complete in < 5 minutes on 79 queries with ~240 candidates.
+    
+    **FORBIDDEN** — O(2^n) or O(n^k) enumeration:
+    ```python
+    for combo in itertools.combinations(candidates, k):  # WILL TIMEOUT
+    for subset in powerset(candidates):                   # WILL TIMEOUT
+    ```
+    
+    **REQUIRED** — O(n²) or better (greedy, beam search, heuristic, etc.)
+    
+    ## SIZE ESTIMATION REQUIREMENT
+    
+    You MUST call `cost_evaluation.calculate_cost()` with `store_size=True`
+    at least once per index to populate `idx.estimated_size`.
+    
+    ## FUNCTION SIGNATURE (preserve exactly)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    **Hard constraints:** Storage <= 500MB, Count <= 15
+    
+    Return ONLY the evolved function code.
+
+  num_top_programs: 3
+  num_diverse_programs: 3     # More diverse examples for inspiration
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 100
+  num_islands: 5              # More islands for independent search diversity
+  migration_interval: 15      # Let islands diverge more before sharing
+  migration_rate: 0.1
+  elite_selection_ratio: 0.12 # Narrower elite for sharper selection pressure
+  exploration_ratio: 0.45     # High exploration to escape noise-induced plateaus
+  exploitation_ratio: 0.45    # Balanced with exploration
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 10
+
+evaluator:
+  timeout: 3600              # 60 min per eval (TPC-DS has more queries than JOB)
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 1    # Sequential to avoid cache interference
+  use_llm_feedback: false
+
+# TPC-DS latency evaluation
+eval_benchmark: "tpcds"
+
+# Skip pathological queries
+skip_queries: [0, 5, 56, 63]
+
+# Environment variables consumed by evaluator_latency_interleaved.py
+env_vars:
+  LATENCY_NUM_RUNS: "1"              # 1 run per query (fast iteration; use 3-5 for final comparison)
+  LATENCY_WARMUP_INDEXES: "1"        # Interleaved warmup: run query once before each measurement
+  EVAL_PREWARM: "1"                  # pg_prewarm: pin all tables+indexes in shared_buffers
+  EVAL_SUPPRESS_BG: "1"              # CHECKPOINT + disable autovacuum during measurement
+  EVAL_TOP_QUERIES: "0"              # 0 = measure all queries (set to ~30 for faster evolution)
+  TPCDS_SKIP_QUERIES: "0,5,56,63"   # Skip pathological queries (env var override)

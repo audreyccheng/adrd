@@ -1,0 +1,101 @@
+# OpenEvolve Configuration - Escape Local Optima
+# ================================================
+# Key insight: Greedy gets stuck. Use randomization to escape.
+
+output_dir: "outputs/escape_local_optima"  # Overridden by run_openevolve.py
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 43
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 50
+convergence_threshold: 0.002
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.9
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## KEY INSIGHT: GREEDY GETS STUCK IN LOCAL OPTIMA
+    
+    The current algorithm uses greedy selection - it always picks the best next index.
+    This is fast but **gets trapped** because:
+    - Once an index is added, it's never reconsidered
+    - Two mediocre indexes together might beat one great index
+    - Greedy can't see this and commits to suboptimal choices early
+    
+    ## YOUR MISSION: ESCAPE LOCAL OPTIMA
+    
+    Try techniques that can backtrack or explore alternatives:
+    
+    1. **Random Restarts**: Run greedy multiple times from different starting points
+    2. **Simulated Annealing**: Sometimes accept worse moves to escape traps
+    3. **Swap-based Search**: After greedy, try swapping indexes to improve
+    
+    The key is: **don't just commit to the first good solution you find**.
+    
+    ## CONSTRAINTS (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    - Storage: total_size <= budget_MB * 1024 * 1024 bytes
+    - Count: len(selected) <= max_indexes  
+    - ANY constraint violation = score of 0.0
+    - Empty sets score poorly (~0.20) - always return something useful
+    
+    Return ONLY the evolved function code.
+
+  num_top_programs: 3
+  num_diverse_programs: 2
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 100
+  num_islands: 3
+  migration_interval: 10
+  migration_rate: 0.1
+  elite_selection_ratio: 0.15
+  exploration_ratio: 0.35
+  exploitation_ratio: 0.55
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 10
+
+evaluator:
+  timeout: 600
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 4
+  use_llm_feedback: false
+

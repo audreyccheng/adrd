@@ -1,0 +1,170 @@
+# OpenEvolve Configuration - JOB/IMDB Single Workload
+# ==================================================
+# VALIDATED INSIGHTS from baseline analysis:
+# - Best baselines: 3-way tie at 43.9% (initial_program, autoadmin, extend)
+# - Simple greedy strategies work well
+# - Key success factors: full budget utilization, fewer but larger indexes
+
+output_dir: "outputs/job_only"
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 202
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 50
+convergence_threshold: 0.002
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.85
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## PROBLEM: SELECT INDEXES FOR JOB/IMDB WORKLOAD
+    
+    JOB/IMDB characteristics (33 queries FULL workload, 2000MB budget, 21 tables):
+    - **title** appears in 100% of queries - MANDATORY to index well
+    - **name** (80%), **movie_keyword** (80%) are high-value join columns
+    - **cast_info** is HUGE (36M rows) but only 51% of queries - size/benefit tradeoff
+    - Large budget (2000MB = 4x TPC-H) allows more indexes
+    - **~150 candidate indexes** generated from workload
+    
+    ## ⚠️ CRITICAL: ALGORITHM COMPLEXITY REQUIREMENTS
+    
+    Your algorithm MUST complete in < 5 minutes on 33 queries with 150 candidates.
+    
+    ### 🚫 FORBIDDEN PATTERNS (will timeout - DO NOT USE!)
+    
+    ```python
+    # ❌ NEVER DO THIS - O(n^k) exponential complexity!
+    for combo in itertools.combinations(candidates, k):  # FORBIDDEN
+        cost = evaluate(combo)
+    
+    # ❌ NEVER DO THIS - O(n^k) exponential!
+    for combo in itertools.permutations(candidates, k):  # FORBIDDEN
+    
+    # ❌ NEVER enumerate all subsets
+    for subset in powerset(candidates):  # FORBIDDEN
+    ```
+    
+    With 150 candidates, combinations(150, 2) = 11,175 evaluations.
+    combinations(150, 3) = 551,300 evaluations. THIS WILL TIMEOUT!
+    
+    ### ✅ REQUIRED: O(n²) or better complexity
+    
+    ```python
+    # ✅ GOOD: Greedy selection - O(n × max_indexes)
+    selected = set()
+    for _ in range(max_indexes):
+        best = max(candidates - selected, key=lambda c: marginal_benefit(c, selected))
+        if marginal_benefit(best, selected) > 0:
+            selected.add(best)
+    
+    # ✅ GOOD: Single-pass scoring - O(n)
+    scored = [(idx, score(idx)) for idx in candidates]
+    selected = sorted(scored, key=lambda x: -x[1])[:max_indexes]
+    ```
+    
+    ## TECHNIQUES TO CONSIDER
+    
+    ### Greedy marginal benefit (RECOMMENDED)
+    Add one index at a time based on marginal cost reduction.
+    
+    ### Full budget utilization
+    Winners use ~2000/2000 MB. Under-utilization fails.
+    
+    ### Quality over quantity
+    Fewer, higher-impact indexes may be better than many small ones.
+    
+    ### Table prioritization
+    title (100% coverage), name (80%), movie_keyword (80%) are key.
+    cast_info is huge (36M rows) - be selective about indexing it.
+    
+    ## PATTERNS TO AVOID
+    
+    ❌ `itertools.combinations` on candidate sets (EXPONENTIAL!)
+    ❌ `itertools.permutations` on candidate sets (EXPONENTIAL!)
+    ❌ Nested loops evaluating all pairs/triples of candidates
+    ❌ Under-utilizing the 2000MB budget
+    
+    ## ⚠️ CRITICAL: SIZE ESTIMATION REQUIREMENT
+    
+    When calling `cost_evaluation.calculate_cost()`, you MUST use `store_size=True`
+    at least once per index to populate `idx.estimated_size`. This is REQUIRED for
+    constraint checking.
+    
+    ```python
+    # ✅ CORRECT: store_size=True populates idx.estimated_size
+    cost = cost_evaluation.calculate_cost(workload, {idx}, store_size=True)
+    
+    # ⚠️ DANGEROUS: store_size=False leaves idx.estimated_size = 0
+    cost = cost_evaluation.calculate_cost(workload, {idx}, store_size=False)
+    # If you use this for speed, you MUST manually set idx.estimated_size!
+    ```
+    
+    If all returned indexes have `estimated_size = 0`, the storage constraint check
+    will be incorrect and your solution may be penalized or rejected.
+    
+    ## CONSTRAINTS (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 2000.0,
+    ) -> Set[Index]:
+    ```
+    
+    **Hard constraints:** Storage <= 2000MB, Count <= 15
+    
+    Return ONLY the evolved function code.
+
+  num_top_programs: 3
+  num_diverse_programs: 2
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 100
+  num_islands: 3
+  migration_interval: 10
+  migration_rate: 0.1
+  elite_selection_ratio: 0.15
+  exploration_ratio: 0.30
+  exploitation_ratio: 0.60
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 10
+
+evaluator:
+  timeout: 1200             # JOB has large tables (cast_info: 36M rows), needs more time
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 1
+  use_llm_feedback: false
+
+# Single workload evaluation
+eval_benchmark: "job"

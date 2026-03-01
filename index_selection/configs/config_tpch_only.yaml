@@ -1,0 +1,202 @@
+# OpenEvolve Configuration - TPC-H Single Workload (v4 with hard constraints)
+# ==============================================================================
+# VALIDATED INSIGHTS from baseline + latency analysis (Jan 6, 2026):
+# - Best baseline for LATENCY: anytime (19.5% latency reduction) 🏆
+# - Best evolved for LATENCY: tpch_v3_extend (14.5% latency reduction)
+# - Key insight: Cost optimization can HURT latency - need hard constraints
+# - Failure mode: Date indexes on fact tables have ZERO cost-latency correlation
+
+output_dir: "outputs/tpch_only_v2"
+max_iterations: 100
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 200
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 40
+convergence_threshold: 0.002
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+      api_base: "https://east-docetl.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+  temperature: 0.95  # Increased from 0.85 to escape plateaus faster
+  top_p: 0.95
+  max_tokens: 16000
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## PROBLEM: SELECT INDEXES FOR TPC-H WORKLOAD
+    
+    TPC-H characteristics (18 queries, 500MB budget, 8 tables, ~80 candidates):
+    - lineitem (6M rows), orders (1.5M rows) are largest tables
+    - Queries involve multi-table joins and range predicates
+    
+    ## ⚠️ CRITICAL: ALGORITHM COMPLEXITY REQUIREMENTS
+    
+    Your algorithm MUST complete in < 2 minutes on 18 queries with 80 candidates.
+    
+    ### 🚫 FORBIDDEN PATTERNS (will timeout!)
+    ```python
+    # ❌ NEVER - O(n^k) exponential!
+    for combo in itertools.combinations(candidates, k):  # FORBIDDEN
+    for subset in powerset(candidates):  # FORBIDDEN
+    ```
+    
+    ### ✅ REQUIRED: O(n²) or better
+    ```python
+    # ✅ GOOD: Greedy selection
+    for _ in range(max_indexes):
+        best = max(remaining, key=lambda c: marginal_benefit(c, selected))
+        selected.add(best)
+    ```
+    
+    ## 🎯 CRITICAL CONSTRAINTS (LEARNED FROM LATENCY ANALYSIS)
+    
+    These constraints are based on analyzing which solutions achieve good
+    ACTUAL LATENCY (not just cost estimates). Cost estimates can be misleading!
+    
+    ### 1. SELECT EXACTLY 12-13 INDEXES (OPTIMAL RANGE)
+    
+    Solutions with 12-13 indexes perform best:
+    - Best evolved: 12 indexes → 20.5% latency reduction ✅
+    - Anytime baseline: 13 indexes → 19.5% latency reduction ✅
+    - Too few (7-8): 12% latency or worse ❌
+    - Too many (15+): Diminishing returns
+    
+    ALWAYS aim for exactly 12-13 indexes.
+    
+    ### 2. BALANCED TABLE DISTRIBUTION (CRITICAL!)
+    
+    The best-performing solution distributes indexes across tables:
+    
+    | Table    | Indexes | Why Important |
+    |----------|---------|---------------|
+    | partsupp | 3-4     | Central join hub for part/supplier |
+    | orders   | 2-3     | Customer-order joins |
+    | lineitem | 2-3     | Largest table, key fact table |
+    | supplier | 1-2     | Supplier lookups |
+    | customer | 1-2     | Customer predicates |
+    | nation   | 1       | Small dimension |
+    
+    ⚠️ FAILURE MODE: Over-weighting lineitem/orders while ignoring other
+    tables leads to WORSE actual latency, even if cost estimates improve!
+    The PostgreSQL cost model diverges from execution time for these tables.
+    
+    ### 3. PRIORITIZE JOIN KEYS OVER FILTER PREDICATES
+    
+    Join-supporting indexes have better cost-to-latency correlation:
+    - ✅ custkey, partkey, suppkey, orderkey (join columns)
+    - ⚠️ shipdate, orderdate (date filters - AVOID!)
+    
+    Ensure coverage of major join paths:
+    - lineitem ↔ orders (l_orderkey, o_orderkey)
+    - lineitem ↔ partsupp (l_partkey, l_suppkey)
+    - orders ↔ customer (o_custkey, c_custkey)
+    - supplier ↔ nation (s_nationkey)
+    
+    ### 4. 🚫 FORBIDDEN INDEX COLUMNS (ZERO LATENCY CORRELATION!)
+    
+    These columns show ZERO correlation between cost reduction and latency improvement.
+    The cost model LIES about these - they look good but hurt actual performance!
+    
+    **DO NOT CREATE INDEXES ON:**
+    - lineitem.l_shipdate (cost model overestimates benefit)
+    - lineitem.l_commitdate (same issue)
+    - lineitem.l_receiptdate (same issue)
+    - orders.o_orderdate (date range scans don't help latency)
+    - orders.o_shippriority (low selectivity)
+    
+    **WHY:** 11 of 18 TPC-H queries (61%) have ZERO cost-latency correlation.
+    Most involve date filters on lineitem/orders. Indexing these columns
+    improves cost estimates but NOT actual execution time.
+    
+    ### 5. HIGH-VALUE PATTERNS (hints, not constraints)
+    
+    - Dimension tables (nation, region, partsupp) often have high join impact
+    - Composite indexes (join_key, filter_col) can help
+    - Consider synergy between related join keys
+    
+    ## TECHNIQUES TO CONSIDER
+    
+    - Greedy marginal benefit (recommended)
+    - Multi-seed exploration with different table priorities
+    - Full budget utilization (aim for 490+ MB used)
+    
+    ## ⚠️ CRITICAL: SIZE ESTIMATION REQUIREMENT
+    
+    When calling `cost_evaluation.calculate_cost()`, you MUST use `store_size=True`
+    at least once per index to populate `idx.estimated_size`. This is REQUIRED for
+    constraint checking.
+    
+    ```python
+    # ✅ CORRECT: store_size=True populates idx.estimated_size
+    cost = cost_evaluation.calculate_cost(workload, {idx}, store_size=True)
+    
+    # ⚠️ DANGEROUS: store_size=False leaves idx.estimated_size = 0
+    cost = cost_evaluation.calculate_cost(workload, {idx}, store_size=False)
+    # If you use this for speed, you MUST manually set idx.estimated_size!
+    ```
+    
+    If all returned indexes have `estimated_size = 0`, the storage constraint check
+    will be incorrect and your solution may be penalized or rejected.
+    
+    ## FUNCTION SIGNATURE (PRESERVE EXACTLY)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    **Hard constraints:** Storage <= 500MB, Count <= 15
+    
+    Return ONLY the evolved function code.
+
+  num_top_programs: 3
+  num_diverse_programs: 2
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 20480
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 500
+  archive_size: 100
+  num_islands: 3
+  migration_interval: 10
+  migration_rate: 0.1
+  elite_selection_ratio: 0.15
+  exploration_ratio: 0.40   # Increased from 0.30 to escape plateaus faster
+  exploitation_ratio: 0.50  # Reduced to balance
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 10
+
+evaluator:
+  timeout: 600              # TPC-H is fast but give some buffer
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 1
+  use_llm_feedback: false
+
+# Single workload evaluation
+eval_benchmark: "tpch"
+

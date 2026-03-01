@@ -1,0 +1,189 @@
+# OpenEvolve Configuration - TPC-DS LATENCY Evolution v2
+# ======================================================
+# GOAL: Improve upon v1 (config_tpcds_latency.yaml) which achieved:
+#   - Evolved extend: 38,594.73s (best), 3.01% better than baseline
+#   - Evolved autoadmin: 39,639.83s, 1.35% better than baseline
+#
+# KEY CHANGES FROM v1:
+#   1. RICHER PROMPT: Domain knowledge from v1 results — cost reduction does NOT
+#      predict latency; table-importance weighting works; multi-column extensions help
+#   2. MORE ITERATIONS: 50 (was 30) — v1 may have stopped before convergence
+#   3. FASTER EVALS via EVAL_TOP_QUERIES=55: measure top 55 of 75 queries (~90%
+#      frequency weight) → ~27% faster per iteration → more iterations per hour
+#   4. 7 ISLANDS (was 5): broader parallel search with slower migration
+#   5. HIGHER PATIENCE: 40 (was 50) with tighter convergence — more time to explore
+#      before giving up, but stop faster once truly converged
+#   6. SEED FROM EVOLVED: Start from best_program.py (evolved extend v1), not baseline
+#
+# EVALUATOR: evaluator_latency_interleaved.py
+# PREREQUISITES: Same as v1 (shared_buffers=8GB, pg_prewarm, hypopg, etc.)
+# SKIP QUERIES: Q0, Q5, Q56, Q63 — same as v1
+#
+# RECOMMENDED SEED PROGRAM:
+#   harald-findings/evolve-interleaved/tpc-ds/tpcds-extend-lowconvergence1/best/best_program.py
+#
+# LAUNCH EXAMPLE:
+#   export INDEX_PROJECT_ROOT=/home/ec2-user/index
+#   PGPORT=5436 python run_openevolve.py \
+#     -c configs/config_tpcds_latency_v2.yaml \
+#     -i harald-findings/evolve-interleaved/tpc-ds/tpcds-extend-lowconvergence1/best/best_program.py \
+#     --evaluator evaluator_latency_interleaved.py \
+#     --output-dir harald-findings/evolve-interleaved/tpc-ds/tpcds-extend-v2
+
+output_dir: "outputs/tpcds_latency_v2"
+max_iterations: 50
+checkpoint_interval: 10
+log_level: "INFO"
+random_seed: 402
+
+diff_based_evolution: true
+max_code_length: 40000
+early_stopping_patience: 40
+convergence_threshold: 150   # Tighter than v1 (300) — detect plateaus earlier
+early_stopping_metric: "combined_score"
+
+llm:
+  api_base: "https://api.openai.com/v1"
+  models:
+    - name: "gpt-5-mini"
+      weight: 1.0
+  temperature: 1.0
+  top_p: 0.95
+  max_tokens: 20000   # More room for complex algorithms (was 16000)
+  timeout: 300
+  retries: 3
+  retry_delay: 5
+
+prompt:
+  template_dir: null
+  
+  system_message: |
+    You are an expert in database index selection optimization.
+    
+    ## PROBLEM: SELECT INDEXES FOR TPC-DS WORKLOAD
+    
+    Fitness is measured by **actual query execution time** (latency), NOT cost estimates.
+    
+    ### CRITICAL INSIGHT: Cost reduction ≠ latency reduction
+    
+    Prior experiments show PostgreSQL's cost model is **misleading** for TPC-DS:
+    - Baseline solutions with **50% cost reduction** have **worse latency** than
+      evolved solutions with only **34% cost reduction**.
+    - The cost model overestimates benefit of some indexes and misses real bottlenecks.
+    - **Do NOT optimize for cost reduction.** Focus on strategies that reduce real
+      execution time, even if the planner's cost estimate looks worse.
+    
+    ### WORKLOAD CHARACTERISTICS
+    
+    - 75 queries evaluated (Q0/Q5/Q56/Q63 skipped), 500MB budget, 25 tables
+    - ~240 candidate indexes generated from workload
+    - **date_dim** appears in 84% of queries — CRITICAL dimension table
+    - **store** appears in 73% of queries — key filter dimension
+    - Three fact tables: store_sales (68%), catalog_sales, web_sales
+    - Complex star/snowflake schema with many dimension joins
+    - A handful of heavy queries dominate total latency — optimizing the top
+      10-15 heaviest queries matters more than marginal gains on light queries
+    
+    ### WHAT WORKS (from prior evolution)
+    
+    The best-performing solutions so far share these traits:
+    1. **Table-importance weighting**: Bias index selection toward date_dim (2-3×)
+       and store (1.5-2×) tables — these dimension lookups are real bottlenecks
+    2. **Benefit-per-byte scoring**: rank candidates by (marginal_benefit × weight) / size,
+       not by raw benefit alone — this uses the 500MB budget more efficiently
+    3. **Multi-column extensions**: After greedy single-column selection, try extending
+       indexes with additional columns (up to width 3) — composite indexes can
+       eliminate extra lookups
+    4. **Full budget utilization**: Solutions using ~490-500MB outperform conservative
+       ones using <300MB — more indexes = more queries accelerated
+    5. **Greedy with validation**: Score candidates quickly, then validate with
+       actual cost_evaluation.calculate_cost() before committing
+    
+    ### UNEXPLORED DIRECTIONS (try these!)
+    
+    - **Query-cluster-aware selection**: Group queries by access pattern (e.g., all
+      queries hitting date_dim+store_sales), select indexes that cover entire clusters
+    - **Workload-frequency weighting**: Weight index benefit by query frequency —
+      an index that helps a freq=100 query is 10× more valuable than one helping freq=10
+    - **Swap/replace phase**: After greedy fill, try swapping low-benefit indexes
+      for untried candidates (simulated annealing / local search)
+    - **Redundancy elimination**: Remove indexes that are strict prefixes of others
+      already selected, freeing budget for new indexes
+    - **Column-order optimization**: For multi-column indexes, try different column
+      orderings — leading column determines range scan efficiency
+    - **Fact-table covering indexes**: Composite indexes on store_sales/catalog_sales
+      that cover both join and filter columns can eliminate heap fetches
+    
+    ## ALGORITHM COMPLEXITY REQUIREMENTS
+    
+    Your algorithm MUST complete in < 5 minutes on 79 queries with ~240 candidates.
+    
+    **FORBIDDEN** — O(2^n) or O(n^k) enumeration:
+    ```python
+    for combo in itertools.combinations(candidates, k):  # WILL TIMEOUT
+    for subset in powerset(candidates):                   # WILL TIMEOUT
+    ```
+    
+    **REQUIRED** — O(n²) or better (greedy, beam search, heuristic, etc.)
+    
+    ## SIZE ESTIMATION REQUIREMENT
+    
+    You MUST call `cost_evaluation.calculate_cost()` with `store_size=True`
+    at least once per index to populate `idx.estimated_size`.
+    
+    ## FUNCTION SIGNATURE (preserve exactly)
+    
+    ```python
+    def select_best_indexes(
+        workload,
+        candidate_indexes: Set[Index],
+        cost_evaluation: CostEvaluation,
+        max_indexes: int = 15,
+        budget_MB: float = 500.0,
+    ) -> Set[Index]:
+    ```
+    
+    **Hard constraints:** Storage <= 500MB, Count <= 15
+    
+    Return ONLY the evolved function code.
+
+  num_top_programs: 4       # Show more top programs for richer context (was 3)
+  num_diverse_programs: 4   # More diverse examples for inspiration (was 3)
+  use_template_stochasticity: true
+  include_artifacts: true
+  max_artifact_bytes: 24576  # Slightly larger artifact window (was 20480)
+
+database:
+  in_memory: true
+  log_prompts: true
+  population_size: 600     # Larger population for more diversity (was 500)
+  archive_size: 120        # Proportionally larger archive (was 100)
+  num_islands: 7           # More islands for broader parallel search (was 5)
+  migration_interval: 20   # Longer isolation before sharing (was 15)
+  migration_rate: 0.08     # Slightly lower to preserve island diversity (was 0.1)
+  elite_selection_ratio: 0.10  # Narrower elite for sharper pressure (was 0.12)
+  exploration_ratio: 0.50  # Slightly more exploration (was 0.45)
+  exploitation_ratio: 0.40 # Slightly less exploitation (was 0.45)
+  feature_dimensions:
+    - "complexity"
+    - "diversity"
+  feature_bins: 12         # Finer-grained MAP-Elites bins (was 10)
+
+evaluator:
+  timeout: 3600
+  max_retries: 3
+  cascade_evaluation: false
+  parallel_evaluations: 1
+  use_llm_feedback: false
+
+eval_benchmark: "tpcds"
+
+skip_queries: [0, 5, 56, 63]
+
+env_vars:
+  LATENCY_NUM_RUNS: "1"
+  LATENCY_WARMUP_INDEXES: "1"
+  EVAL_PREWARM: "1"
+  EVAL_SUPPRESS_BG: "1"
+  EVAL_TOP_QUERIES: "55"           # Top 55 of 75 queries (~90% freq weight) — faster evals (was 0=all)
+  TPCDS_SKIP_QUERIES: "0,5,56,63"
