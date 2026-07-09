@@ -1,3 +1,8 @@
 pyyaml>=6.0
+numpy>=1.22.0
+tqdm>=4.64.0
 openai>=1.0        # optional: for LLM-guided mutation + Python-to-C translation
 anthropic>=0.20    # optional: alternative LLM provider
+
+# Bundled OpenEvolve (inner-loop policy evolution):
+#   pip install -e ./openevolve

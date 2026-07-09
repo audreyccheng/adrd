@@ -24,8 +24,8 @@ except ImportError:
     from simulator_config import SimulatorConfig
 
 
-# Path to the PBM buffer simulator.
-# Override with SIMEVOLVER_SIMULATOR_DIR env var, or symlink/clone into pg_clean/simulator/
+# Path to the bundled PBM buffer simulator.
+# Override with SIMEVOLVER_SIMULATOR_DIR env var to use an external checkout.
 V5_SIMULATOR_DIR = os.environ.get(
     "SIMEVOLVER_SIMULATOR_DIR",
     str(Path(__file__).parent / "simulator"),

@@ -105,8 +105,6 @@ def _enforce_backward_deps(config: SimulatorConfig) -> SimulatorConfig:
         changes.update(enable_confidence=False, enable_block_group_estimate=False)
     return config.clone(**changes) if changes else config
 
-    return new_config
-
 
 def mutate_numeric(config: SimulatorConfig, rng: Optional[random.Random] = None) -> SimulatorConfig:
     """Adjust a random numeric parameter."""

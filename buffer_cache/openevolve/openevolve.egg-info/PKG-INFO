@@ -1,0 +1,20 @@
+Metadata-Version: 2.4
+Name: openevolve
+Version: 0.2.15
+Summary: Open-source implementation of AlphaEvolve
+Author: codelion
+License: Apache-2.0
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: openai>=1.0.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: numpy>=1.22.0
+Requires-Dist: tqdm>=4.64.0
+Requires-Dist: flask
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: black>=22.0.0; extra == "dev"
+Requires-Dist: isort>=5.10.0; extra == "dev"
+Requires-Dist: mypy>=0.950; extra == "dev"
+Requires-Dist: requests>=2.28.0; extra == "dev"

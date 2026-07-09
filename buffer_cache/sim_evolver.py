@@ -61,6 +61,8 @@ class SimEvolver:
         skip_benchmark: bool = False,
         skip_translation: bool = False,
         llm_model: str = "gpt-4o-mini",
+        use_random_mutation: bool = False,
+        direct_eval: bool = False,
     ):
         """
         Args:
@@ -74,16 +76,20 @@ class SimEvolver:
             skip_benchmark: Skip real PG benchmarks (use sim score only)
             skip_translation: Skip Python-to-C translation
             llm_model: Model for outer loop LLM-guided mutation (default: gpt-4o-mini)
+            use_random_mutation: Use random config mutations instead of LLM guidance
+            direct_eval: Skip OpenEvolve; score the generated initial policy only
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.population_size = population_size
-        self.inner_iterations = inner_iterations
+        self.inner_iterations = 0 if direct_eval else inner_iterations
         self.translation_threshold = translation_threshold
         self.benchmark_top_k = benchmark_top_k
         self.skip_benchmark = skip_benchmark
         self.skip_translation = skip_translation
         self.llm_model = llm_model
+        self.use_random_mutation = use_random_mutation
+        self.direct_eval = direct_eval
 
         self.rng = random.Random(random_seed)
         self.tracker = ResultTracker(str(self.output_dir))
@@ -93,6 +99,14 @@ class SimEvolver:
         # Initialize population
         if seed_configs:
             self.population = list(seed_configs)
+            while len(self.population) < self.population_size:
+                parent = self.rng.choice(self.population)
+                child = mutate(parent, self.rng)
+                child = child.clone(
+                    name=f"seed_variant_{len(self.population)}",
+                    inner_iterations=self.inner_iterations,
+                )
+                self.population.append(child)
         else:
             self.population = self._default_population()
 
@@ -102,7 +116,8 @@ class SimEvolver:
         self.generation = 0
 
         logger.info(f"SimEvolver initialized: pop={population_size}, "
-                     f"inner_iter={inner_iterations}, output={output_dir}")
+                     f"inner_iter={self.inner_iterations}, output={output_dir}, "
+                     f"random_mutation={use_random_mutation}, direct_eval={direct_eval}")
 
     def _default_population(self) -> List[SimulatorConfig]:
         """Create default population: V5 baseline + random mutations."""
@@ -259,11 +274,15 @@ class SimEvolver:
         oe_config_path = generate_openevolve_config(config, str(output_path))
         initial_program_path = str(output_path / "initial_program.py")
 
-        # Find openevolve-run.py
+        # Find openevolve-run.py (bundled copy or override)
         openevolve_run = os.environ.get(
             "SIMEVOLVER_OPENEVOLVE_RUN",
             str(Path(__file__).parent / "openevolve" / "openevolve-run.py"),
         )
+        if self.direct_eval or config.inner_iterations <= 0:
+            logger.info("  Using direct evaluation (inner_iterations=0)")
+            return self._run_direct_evaluation(config, evaluator_path, initial_program_path, output_dir)
+
         if not os.path.exists(openevolve_run):
             logger.warning(f"openevolve-run.py not found at {openevolve_run}")
             # Fall back to direct evaluator test
@@ -442,17 +461,20 @@ class SimEvolver:
                 breakdown = ", ".join(parts)
             gen_history.append((r.config_name, r.simulator_score, breakdown))
 
-        # Fill rest with LLM-guided mutations (default) or random (fallback)
+        # Fill rest with mutations (random or LLM-guided)
         while len(new_population) < self.population_size:
             # Tournament selection from top half
             parent_idx = self.rng.randint(0, max(0, len(ranked) // 2 - 1))
             parent_config = SimulatorConfig(**ranked[parent_idx].config_dict)
 
-            child = mutate_llm(
-                parent_config,
-                generation_results=gen_history,
-                model=self.llm_model,
-            )
+            if self.use_random_mutation:
+                child = mutate(parent_config, self.rng)
+            else:
+                child = mutate_llm(
+                    parent_config,
+                    generation_results=gen_history,
+                    model=self.llm_model,
+                )
             child = child.clone(
                 name=f"gen{self.generation + 1}_child_{len(new_population)}",
                 inner_iterations=self.inner_iterations,
@@ -534,6 +556,12 @@ def main():
                         help="Seed config preset name (e.g., v1, v3, v5)")
     parser.add_argument("--llm-model", default="gpt-4o-mini",
                         help="Model for outer loop LLM-guided mutation")
+    parser.add_argument("--random-mutation", action="store_true",
+                        help="Use random simulator-config mutations (no LLM/API key)")
+    parser.add_argument("--direct-eval", action="store_true",
+                        help="Skip OpenEvolve; score generated initial policy only")
+    parser.add_argument("--quick", action="store_true",
+                        help="Use fast workloads (tpch_fast + tpcc_10w_stress)")
     parser.add_argument("--log-level", default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"])
 
@@ -546,7 +574,14 @@ def main():
 
     # Build seed configs
     seed_configs = None
-    if args.config:
+    if args.quick:
+        from simulator_config import quick_config
+        seed_configs = [quick_config()]
+        if args.inner_iterations == 50:
+            args.inner_iterations = 0
+        if not args.direct_eval:
+            args.direct_eval = True
+    elif args.config:
         if args.config in PRESET_CONFIGS:
             seed_configs = [PRESET_CONFIGS[args.config]()]
         else:
@@ -561,6 +596,8 @@ def main():
         skip_benchmark=args.skip_benchmark,
         skip_translation=args.skip_translation,
         llm_model=args.llm_model,
+        use_random_mutation=args.random_mutation,
+        direct_eval=args.direct_eval,
     )
 
     if args.ablation:

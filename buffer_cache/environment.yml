@@ -1,0 +1,15 @@
+name: buffer-cache
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pyyaml>=6.0
+  - numpy>=1.22
+  - tqdm>=4.64
+
+# After creating the env, install pip packages from this directory:
+#   conda activate buffer-cache
+#   pip install openai anthropic flask
+#   pip install -e ./openevolve

@@ -43,35 +43,27 @@ OUTER LOOP (SimEvolver — lightweight, LLM-guided)
 
 ## Setup
 
-This repo needs three external components linked into place:
-
-### 1. Simulator (required for inner loop)
-
-The PBM buffer management simulator. Symlink or clone:
+Use the **`buffer-cache`** conda environment (recorded in `.conda-env`):
 
 ```bash
-# If working within the monorepo:
-ln -s ../benchmarks/minimal_postgres_simulator pg_clean/simulator
+cd adrd/buffer_cache
 
-# Or clone separately:
-# git clone <simulator-repo-url> pg_clean/simulator
+# Create env (first time only)
+conda env create -f environment.yml   # creates env: buffer-cache
+conda activate buffer-cache
+pip install openai anthropic flask
+pip install -e ./openevolve
+
+# Or if env already exists:
+conda activate buffer-cache
 ```
 
-### 2. OpenEvolve (required for full inner loop evolution)
+Env path: `/opt/anaconda3/envs/buffer-cache` (Python 3.11)
 
-LLM-guided policy evolution engine. Symlink or clone:
+The PBM buffer simulator is bundled in `simulator/`. OpenEvolve is bundled in
+`openevolve/`. No symlinks to the postgres repo are required.
 
-```bash
-ln -s ../openevolve pg_clean/openevolve
-
-# Or clone separately:
-# git clone <openevolve-repo-url> pg_clean/openevolve
-# cd pg_clean/openevolve && pip install -e .
-```
-
-Not needed for direct evaluation / ablation studies.
-
-### 3. postgres-pbm (required for C translation + real benchmarks)
+### postgres-pbm (optional — C translation + real benchmarks)
 
 **Git submodule placeholder** — not yet linked. This is where a submodule to the `postgres-pbm` repo should be added:
 
@@ -83,24 +75,44 @@ Not needed for simulator-only runs (`--skip-benchmark --skip-translation`).
 
 ## Quick Start
 
-### Ablation study (simulator-only, no external deps beyond simulator)
+### Smoke test (standalone, no API key, ~1 min)
 
 ```bash
-# Link the simulator
-ln -s ../benchmarks/minimal_postgres_simulator simulator
+conda activate buffer-cache
 
-# Run ablation: V5 baseline vs single-feature removals
-python -m pg_clean.sim_evolver --ablation --skip-benchmark --skip-translation
+python sim_evolver.py --quick --random-mutation --generations 1 --population 2 \
+    --skip-benchmark --skip-translation --output smoke_output
 ```
 
-### Full outer loop evolution
+### Ablation study (simulator-only, no API key, ~15–20 min)
+
+```bash
+# Run ablation: V5 baseline vs single-feature removals
+python sim_evolver.py --ablation --skip-benchmark --skip-translation
+```
+
+### Full two-level evolution (requires API key)
+
+```bash
+export OPENAI_API_KEY=sk-...
+pip install -e ./openevolve
+
+python sim_evolver.py --config v5 --generations 3 --population 3 \
+    --inner-iterations 10 --skip-benchmark --skip-translation \
+    --output evolution_output
+```
+
+Outer loop mutates `SimulatorConfig` (what info/scoring/workloads policies see).
+Inner loop (OpenEvolve) evolves eviction policies within each config.
+
+### Full outer loop evolution (LLM-guided config mutation)
 
 ```bash
 # Set up LLM API key for outer loop mutations
 export OPENAI_API_KEY=sk-...
 
 # Run 5 generations, population of 5, 50 inner iterations each
-python -m pg_clean.sim_evolver \
+python sim_evolver.py \
     --config v1 \
     --generations 5 \
     --population 5 \
@@ -115,7 +127,7 @@ python -m pg_clean.sim_evolver \
 export OPENAI_API_KEY=sk-...
 export PBM_ROOT=~/pbm-exp  # PostgreSQL install root
 
-python -m pg_clean.sim_evolver \
+python sim_evolver.py \
     --config v1 \
     --generations 10 \
     --population 5 \
@@ -126,17 +138,18 @@ python -m pg_clean.sim_evolver \
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `SIMEVOLVER_SIMULATOR_DIR` | `pg_clean/simulator/` | Path to minimal_postgres_simulator |
-| `SIMEVOLVER_OPENEVOLVE_RUN` | `pg_clean/openevolve/openevolve-run.py` | Path to OpenEvolve entry point |
-| `SIMEVOLVER_PBM_DIR` | `pg_clean/postgres-pbm/` | Path to postgres-pbm source tree |
+| `SIMEVOLVER_SIMULATOR_DIR` | `buffer_cache/simulator/` | Path to minimal_postgres_simulator |
+| `SIMEVOLVER_OPENEVOLVE_RUN` | `buffer_cache/openevolve/openevolve-run.py` | Path to OpenEvolve entry point |
+| `SIMEVOLVER_PBM_DIR` | `buffer_cache/postgres-pbm/` | Path to postgres-pbm source tree |
 | `PBM_ROOT` | `~/pbm-exp` | PostgreSQL install root (for benchmarks) |
 | `OPENAI_API_KEY` | — | OpenAI API key for LLM-guided mutation |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key (alternative) |
 
 ## Files
 
-| File | Purpose |
+| File / Directory | Purpose |
 |------|---------|
+| `openevolve/` | Bundled OpenEvolve for inner-loop policy evolution |
 | `simulator_config.py` | `SimulatorConfig` dataclass — defines the search space (20+ evolvable parameters). V1/V3/V5 presets. |
 | `mutations.py` | LLM-guided mutation (default) + random mutation (fallback). Dependency enforcement. |
 | `evaluator_generator.py` | Generates `evaluator.py` + `initial_program.py` from a config. Information masking layer. |

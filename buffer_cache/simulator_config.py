@@ -271,10 +271,21 @@ def v5_latency_scoring() -> SimulatorConfig:
     )
 
 
+def quick_config() -> SimulatorConfig:
+    """Lightweight V5 preset for fast standalone smoke tests."""
+    return v5_config().clone(
+        name="v5_quick",
+        workload_weights={"tpch_fast": 0.6, "tpcc_10w_stress": 0.4},
+        inner_iterations=0,
+        artifact_suggestions=False,
+    )
+
+
 PRESET_CONFIGS = {
     "v1": v1_config,
     "v3": v3_config,
     "v5": v5_config,
+    "quick": quick_config,
     "v5_no_scan_tracking": v5_no_scan_tracking,
     "v5_no_estimator": v5_no_estimator,
     "v5_no_scan_context": v5_no_scan_context,
