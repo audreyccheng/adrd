@@ -12,14 +12,15 @@ This framework has two loops:
 
 ## Setup
 
-### 1. Clone dependencies
+### 1. External dependencies
 
-This repo requires two git submodules in `deps/`. See [`deps/README.md`](deps/README.md) for instructions.
+Evaluators need Index_EAB and OpenEvolve under `deps/` (clone or symlink).
+See [`deps/README.md`](deps/README.md).
 
 ```bash
-# After linking submodules:
-cd deps/Index_EAB && pip install -r requirements.txt  # if exists
-cd deps/openevolve && pip install -e ".[dev]"
+# After linking deps:
+cd deps/Index_EAB && pip install -r requirements.txt  # if present
+cd deps/openevolve && pip install -e .
 ```
 
 ### 2. Install Python dependencies
@@ -109,7 +110,7 @@ This runs the full outer loop pipeline with pre-computed data from our experimen
 ## Architecture
 
 ```
-index_clean/
+index_selection/
 ├── run_openevolve.py                  # Inner loop entry point
 ├── evaluator.py                       # Cost-based fitness (fast, deterministic)
 ├── evaluator_full.py                  # Cost + reliability weights + latency validation
@@ -126,15 +127,15 @@ index_clean/
 │   ├── evaluator_runner.py            # Subprocess-isolated evaluator execution
 │   ├── ground_truth.py                # Actual latency measurement (cached)
 │   └── ...
-└── deps/                              # Git submodules (see deps/README.md)
+└── deps/                              # External checkouts (see deps/README.md)
     ├── Index_EAB/                     # Database utilities, schemas, workloads
     └── openevolve/                    # OpenEvolve evolution framework
 ```
 
 ### Dependencies via `deps/`
 
-| Submodule | Provides | Used by |
-|-----------|----------|---------|
+| Path | Provides | Used by |
+|------|----------|---------|
 | `Index_EAB/` | `index_advisor_selector/` (Workload, Index, PostgresDatabaseConnector), `configuration_loader/` (DB configs, schemas), `workload_generator/` (benchmark queries) | All evaluators, all initial programs |
 | `openevolve/` | Evolution engine (MAP-Elites, LLM mutation, cascade evaluation) | `run_openevolve.py` |
 

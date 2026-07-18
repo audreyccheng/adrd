@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.tmp_config_*.yaml
+outer_loop_outputs/
+outer_loop_outputs_test/
+outputs/

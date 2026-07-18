@@ -29,8 +29,8 @@ import sys
 
 # Ensure we can import from the outer_loop package
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-INDEX_OPENEVOLVE_DIR = os.path.dirname(SCRIPT_DIR)
-sys.path.insert(0, INDEX_OPENEVOLVE_DIR)
+INDEX_SELECTION_DIR = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, INDEX_SELECTION_DIR)
 
 from outer_loop.config import OuterLoopConfig
 from outer_loop.outer_loop import OuterLoop
@@ -93,8 +93,8 @@ def main():
     if args.model:
         config.llm.model = args.model
 
-    # Resolve paths relative to index_openevolve/
-    config.resolve_paths(INDEX_OPENEVOLVE_DIR)
+    # Resolve paths relative to index_selection/
+    config.resolve_paths(INDEX_SELECTION_DIR)
 
     # Run outer loop
     loop = OuterLoop(config)

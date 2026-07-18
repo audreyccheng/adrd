@@ -14,10 +14,6 @@ import yaml
 # Repo root (relative to this file)
 _REPO_ROOT = Path(__file__).parent.parent
 
-# R-Bot inner loop (TODO: link as git submodule)
-# git submodule add <R-Bot-repo-URL> rbot/
-_RBOT_ROOT = _REPO_ROOT / "rbot"
-
 
 @dataclass
 class EvolutionConfig:

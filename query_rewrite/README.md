@@ -7,7 +7,7 @@ An LLM-driven evolutionary system that discovers optimized Apache Calcite rewrit
 The system consists of two loops:
 
 - **Outer Loop** (`evolve_loop/`): Evolutionary discovery of RuleSelector patterns using Claude as the analyst/implementer. Runs a 5-phase iteration: SEARCH → ANALYZE → IMPLEMENT → VALIDATE → FIX.
-- **Inner Loop** (`rbot/`): R-Bot query rewrite pipeline (LLM-based rule selection + Calcite rule application). Used as the baseline comparison. *(Git submodule — see setup below.)*
+- **R-Bot baseline** (optional): LLM-based rewrite pipeline for comparison. Not required to run `evolve_loop/`.
 
 ```
                  ┌─────────────────────────────────────────┐
@@ -52,9 +52,8 @@ pip install -r requirements.txt
 # 2. Set API key
 export ANTHROPIC_API_KEY="sk-ant-..."
 
-# 3. (Optional) Link R-Bot as git submodule for inner loop comparison
-# git submodule add <R-Bot-repo-URL> rbot/
-# cd rbot && pip install -r requirements.txt
+# 3. (Optional) R-Bot baseline checkout for comparison only
+# Place a LearnedRewrite / R-Bot tree at rbot/ if desired; evolve_loop does not import it.
 
 # 4. Verify Java artifacts
 ls java/LearnedRewrite.jar    # pre-built JAR
@@ -91,7 +90,7 @@ bash java/rebuild_jar.sh
 ## Directory Structure
 
 ```
-qr_clean/
+query_rewrite/
 ├── evolve_loop/           Outer loop: evolutionary RuleSelector discovery
 │   ├── evolve_loop.py     Main orchestrator (5-phase iteration)
 │   ├── config.py          Configuration (paths, rules, thresholds)
@@ -106,7 +105,7 @@ qr_clean/
 │   ├── validate_worker.py Subprocess for fresh JVM validation
 │   ├── utils/             Java bridge, PG runner, JAR builder, code extraction
 │   └── prompts/           System prompts for Claude (analyst, implementer, fixer)
-├── rbot/                  Inner loop: R-Bot (TODO: git submodule)
+├── rbot/                  Optional R-Bot baseline checkout (not used by evolve_loop)
 ├── benchmarks/            SQL benchmark queries
 │   ├── tpch/              TPC-H (22 templates, 44 instances)
 │   └── dsb/               DSB (37 templates, 76 instances)
@@ -121,17 +120,11 @@ qr_clean/
 └── requirements.txt       Python dependencies
 ```
 
-## R-Bot Submodule
+## R-Bot (optional)
 
-The R-Bot inner loop is not included directly. To set it up:
+R-Bot is only needed for baseline comparisons. The outer loop (`evolve_loop/`) does **not** depend on R-Bot Python code — it only shares the benchmark data (`benchmarks/`) and Java artifacts (`java/`).
 
-```bash
-git submodule add <R-Bot-repo-URL> rbot/
-git submodule update --init
-cd rbot && pip install -r requirements.txt
-```
-
-The R-Bot repo provides the LLM-based query rewrite pipeline used as the baseline in our evaluation. The outer loop (`evolve_loop/`) does **not** depend on R-Bot Python code — it only shares the benchmark data (`benchmarks/`) and Java artifacts (`java/`).
+To compare against R-Bot, place a checkout at `rbot/` and install its requirements separately.
 
 ## Configuration
 

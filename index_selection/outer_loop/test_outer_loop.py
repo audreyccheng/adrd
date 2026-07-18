@@ -7,7 +7,7 @@ pre-computed cost scores to demonstrate the full pipeline without
 needing a live database or LLM API key.
 
 Usage:
-    cd index_openevolve
+    cd index_selection
     python outer_loop/test_outer_loop.py
 """
 
@@ -16,8 +16,8 @@ import os
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-INDEX_OPENEVOLVE_DIR = os.path.dirname(SCRIPT_DIR)
-sys.path.insert(0, INDEX_OPENEVOLVE_DIR)
+INDEX_SELECTION_DIR = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, INDEX_SELECTION_DIR)
 
 from outer_loop.discrepancy_analyzer import DiscrepancyAnalyzer
 from outer_loop.strategy import EvaluationStrategy, StrategyHistory, NoiseResult
@@ -245,7 +245,7 @@ def test_full_history_simulation():
     print(f"  Spearman: {best.ranking_agreement:.4f}, Noise: {best.noise_level:.1%}")
 
     # Save history
-    output_dir = os.path.join(INDEX_OPENEVOLVE_DIR, "outer_loop_outputs_test")
+    output_dir = os.path.join(INDEX_SELECTION_DIR, "outer_loop_outputs_test")
     os.makedirs(output_dir, exist_ok=True)
     history.save(os.path.join(output_dir, "history.json"))
     print(f"\nHistory saved to {output_dir}/history.json")
@@ -255,7 +255,7 @@ def test_full_history_simulation():
 
 def create_ground_truth_cache():
     """Create a ground truth cache file from findings data."""
-    output_dir = os.path.join(INDEX_OPENEVOLVE_DIR, "outer_loop_outputs")
+    output_dir = os.path.join(INDEX_SELECTION_DIR, "outer_loop_outputs")
     os.makedirs(output_dir, exist_ok=True)
     cache_path = os.path.join(output_dir, "ground_truth_cache.json")
 
